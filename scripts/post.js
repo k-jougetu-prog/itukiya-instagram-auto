@@ -112,10 +112,11 @@ export async function getPostedIds(igUserId, igToken) {
     const data = await fetchJson(url);
     for (const m of data.data || []) {
       const caption = m.caption || "";
-      const matches = caption.matchAll(/itukiya\.jp\/works\/post-(\d+)/g);
-      for (const match of matches) {
-        ids.add(parseInt(match[1], 10));
-      }
+      // 旧形式：キャプション内HP URL、新形式：#postXXXXX ハッシュタグ
+      const urlMatches = caption.matchAll(/itukiya\.jp\/works\/post-(\d+)/g);
+      for (const match of urlMatches) ids.add(parseInt(match[1], 10));
+      const tagMatches = caption.matchAll(/#post(\d+)/g);
+      for (const match of tagMatches) ids.add(parseInt(match[1], 10));
     }
     if (data.paging?.next) {
       url = data.paging.next;
@@ -136,8 +137,9 @@ function buildCaption(post) {
   return [
     title,
     "",
-    "📷 詳しい施工内容と費用感はプロフィールリンクから🔗",
-    `${post.link}`,
+    "📷 詳しい施工内容と費用感は",
+    "プロフィール（@itukiya_reform_official）の",
+    "リンクからご覧ください🔗",
     "",
     "─────────",
     "🏡 株式会社いつき家｜創業29年",
@@ -146,7 +148,7 @@ function buildCaption(post) {
     "🛡安心の10年間笑顔保証",
     "🕒10-18時／水曜定休",
     "",
-    "#松阪リフォーム #松阪市リフォーム #いつき家 #三重県松阪市 #リフォーム #リフォーム会社 #リノベーション #施工事例 #松阪市 #三重県 #創業29年 #地域密着 #笑顔リフォーム #10年保証",
+    `#松阪リフォーム #松阪市リフォーム #いつき家 #三重県松阪市 #リフォーム #リフォーム会社 #リノベーション #施工事例 #松阪市 #三重県 #創業29年 #地域密着 #笑顔リフォーム #10年保証 #post${post.id}`,
   ].join("\n");
 }
 
