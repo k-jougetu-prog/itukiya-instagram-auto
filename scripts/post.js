@@ -133,27 +133,73 @@ function buildCaption(post) {
   const title = titleRaw
     .replace(/&#8211;/g, "–")
     .replace(/&#8217;/g, "'")
-    .replace(/&#8220;/g, "")  // " 開きクォート削除
-    .replace(/&#8221;/g, "")  // " 閉じクォート削除
-    .replace(/[“”]/g, "") // smart quotes 削除
-    .replace(/"/g, "") // ASCII ダブルクォートも削除
+    .replace(/&#8220;/g, "")
+    .replace(/&#8221;/g, "")
+    .replace(/[“”]/g, "")
+    .replace(/"/g, "")
     .replace(/&amp;/g, "&");
   return [
     title,
     "",
-    "📷 詳しい施工内容と費用感は",
-    "プロフィール（@itukiya_reform_official）の",
-    "リンクからご覧ください🔗",
+    "詳しい施工内容と費用感はプロフィールリンクからどうぞ🔗",
     "",
-    "─────────",
-    "🏡 株式会社いつき家｜創業29年",
-    "📍三重県松阪市の地域密着リフォーム会社",
-    "📞0120-939-878（営業電話一切なし）",
-    "🛡安心の10年間笑顔保証",
-    "🕒10-18時／水曜定休",
+    "松阪市の地域密着リフォーム屋「いつき家」です。",
+    "創業29年、地元一筋でやってきました。",
+    "ご相談・お見積もりはお気軽に。",
+    "☎ 0120-939-878（営業電話は一切しません）",
+    "10〜18時／水曜定休",
     "",
     `#松阪リフォーム #松阪市リフォーム #いつき家 #三重県松阪市 #リフォーム #リフォーム会社 #リノベーション #施工事例 #松阪市 #三重県 #創業29年 #地域密着 #笑顔リフォーム #10年保証 #post${post.id}`,
   ].join("\n");
+}
+
+/**
+ * 画像をafter優先で並び替える。
+ * - 1枚目: featured（アイキャッチ＝メイン完成カット）
+ * - 2枚目以降: after優先で並べつつ、before も対比として混ぜる
+ */
+function reorderImages(featuredUrl, bodyImages, max) {
+  const seen = new Set();
+  const result = [];
+  if (featuredUrl) {
+    result.push(featuredUrl);
+    seen.add(featuredUrl);
+  }
+  const isAfter = (u) => /[\/\-_.]after[\/\-_.]/i.test(u);
+  const isBefore = (u) => /[\/\-_.]before[\/\-_.]/i.test(u);
+
+  const afters = bodyImages.filter((u) => isAfter(u) && !seen.has(u));
+  const befores = bodyImages.filter((u) => isBefore(u) && !seen.has(u));
+  const others = bodyImages.filter((u) => !isAfter(u) && !isBefore(u) && !seen.has(u));
+
+  // ファイル名に before/after が含まれる事例 → after優先＋before少量で対比
+  if (afters.length > 0 || befores.length > 0) {
+    // After 2枚 → Before 2枚 → 残りafter → その他、の順
+    const queue = [
+      ...afters.slice(0, 2),
+      ...befores.slice(0, 2),
+      ...afters.slice(2),
+      ...others,
+      ...befores.slice(2),
+    ];
+    for (const u of queue) {
+      if (result.length >= max) break;
+      if (!seen.has(u)) {
+        result.push(u);
+        seen.add(u);
+      }
+    }
+  } else {
+    // before/after判定なしの事例 → 本文順（従来動作）
+    for (const u of bodyImages) {
+      if (result.length >= max) break;
+      if (!seen.has(u)) {
+        result.push(u);
+        seen.add(u);
+      }
+    }
+  }
+  return result.slice(0, max);
 }
 
 export async function buildPostPayload(post) {
@@ -163,12 +209,7 @@ export async function buildPostPayload(post) {
     ?? (post.featured_media ? await getMediaUrlFallback(post.featured_media) : null);
   const bodyImages = post.body_images
     ?? extractBodyImages(post.content?.rendered || "");
-  const ordered = [];
-  if (featuredUrl) ordered.push(featuredUrl);
-  for (const u of bodyImages) {
-    if (!ordered.includes(u)) ordered.push(u);
-  }
-  const images = ordered.slice(0, MAX_IMAGES);
+  const images = reorderImages(featuredUrl, bodyImages, MAX_IMAGES);
   const caption = buildCaption(post);
   return { images, caption };
 }
