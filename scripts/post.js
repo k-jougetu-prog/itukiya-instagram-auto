@@ -133,6 +133,10 @@ function buildCaption(post) {
   const title = titleRaw
     .replace(/&#8211;/g, "–")
     .replace(/&#8217;/g, "'")
+    .replace(/&#8220;/g, "")  // " 開きクォート削除
+    .replace(/&#8221;/g, "")  // " 閉じクォート削除
+    .replace(/[“”]/g, "") // smart quotes 削除
+    .replace(/"/g, "") // ASCII ダブルクォートも削除
     .replace(/&amp;/g, "&");
   return [
     title,
