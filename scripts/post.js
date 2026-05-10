@@ -35,6 +35,11 @@ const RECENT_YEARS = 3; // フォールバック対象期間（年）
 // GitHub Actionsで定期キャッシュしたJSONを使う
 const CACHE_URL = "https://raw.githubusercontent.com/k-jougetu-prog/itukiya-instagram-auto/main/data/sekou.json";
 
+// 「投稿してIGから削除した」記事は再投稿しない（IG履歴からは消えてるため自動再投稿を防ぐ）
+const IGNORE_POST_IDS = new Set([
+  54210, // O様邸 外構補修工事（2026-05-10 テスト投稿→削除）
+]);
+
 export async function fetchJson(url, init) {
   const headers = {
     "User-Agent":
@@ -80,10 +85,12 @@ export async function selectNextPost(postedIds = new Set()) {
   const recentCutoff = new Date(now);
   recentCutoff.setFullYear(recentCutoff.getFullYear() - RECENT_YEARS);
 
+  const isExcluded = (p) => postedIds.has(p.id) || IGNORE_POST_IDS.has(p.id);
+
   // ステップ1: 新着14日以内、未投稿、新しい順
   const newUnposted = all
     .filter((p) => new Date(p.date).getTime() >= newCutoff)
-    .filter((p) => !postedIds.has(p.id))
+    .filter((p) => !isExcluded(p))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
   if (newUnposted.length > 0) {
     return { post: newUnposted[0], reason: "new" };
@@ -92,7 +99,7 @@ export async function selectNextPost(postedIds = new Set()) {
   // ステップ2: 3年以内、未投稿、古い順から消化
   const recentUnposted = all
     .filter((p) => new Date(p.date) >= recentCutoff)
-    .filter((p) => !postedIds.has(p.id))
+    .filter((p) => !isExcluded(p))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
   if (recentUnposted.length === 0) {
     return { post: null, reason: "exhausted" };
