@@ -45,7 +45,7 @@ export default async function handler(req, res) {
         dryRun: true,
         postId: sel.post.id,
         reason: sel.reason,
-        title: sel.post.title.rendered,
+        title: typeof sel.post.title === "string" ? sel.post.title : (sel.post.title?.rendered || ""),
         date: sel.post.date,
         link: sel.post.link,
         images,
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
     const reasonLabel = sel.reason === "new" ? "新着" : "ストック消化";
     const msg = [
       "[info][title]📷 Instagram投稿成功[/title]",
-      `事例：${sel.post.title.rendered}`,
+      `事例：${typeof sel.post.title === "string" ? sel.post.title : (sel.post.title?.rendered || "")}`,
       `区分：${reasonLabel}`,
       `公開日：${sel.post.date.slice(0, 10)}`,
       `画像：${images.length}枚`,
@@ -83,7 +83,7 @@ export default async function handler(req, res) {
       mediaId,
       postId: sel.post.id,
       reason: sel.reason,
-      title: sel.post.title.rendered,
+      title: typeof sel.post.title === "string" ? sel.post.title : (sel.post.title?.rendered || ""),
       images: images.length,
       postedIdsCount: postedIds.size,
     });

@@ -31,6 +31,10 @@ const MAX_IMAGES = 5; // インスタは最大10だがHP誘導を優先して5�
 const NEW_DAYS = 14; // 「新着」判定の日数（公開からの日数）
 const RECENT_YEARS = 3; // フォールバック対象期間（年）
 
+// XSERVER WAFがVercel Functions経由のWP直叩きを403でブロックするため、
+// GitHub Actionsで定期キャッシュしたJSONを使う
+const CACHE_URL = "https://raw.githubusercontent.com/k-jougetu-prog/itukiya-instagram-auto/main/data/sekou.json";
+
 export async function fetchJson(url, init) {
   const headers = {
     "User-Agent":
@@ -56,60 +60,43 @@ export async function fetchJson(url, init) {
   return json;
 }
 
-async function getWpPostsBatch({ after, before, perPage = 100, page = 1 }) {
-  const params = new URLSearchParams({
-    categories: String(SEKOU_CATEGORY),
-    per_page: String(perPage),
-    page: String(page),
-    orderby: "date",
-    order: "desc",
-    _fields: "id,date,title,link,featured_media,content,categories",
-  });
-  if (after) params.set("after", after);
-  if (before) params.set("before", before);
-  return fetchJson(`${WP_BASE}/posts?${params}`);
+/**
+ * GitHub raw URL から施工事例キャッシュJSONを取得
+ */
+export async function fetchSekouCache() {
+  const data = await fetchJson(CACHE_URL);
+  return data.posts || [];
 }
 
 /**
  * 投稿対象を選択
  * @param {Set<number>} postedIds - 投稿済みのpost_idセット
- * @returns {Promise<object|null>} - 選ばれたWP記事 or null
+ * @returns {Promise<{post: object|null, reason: string}>}
  */
 export async function selectNextPost(postedIds = new Set()) {
+  const all = await fetchSekouCache();
   const now = new Date();
-  const newCutoff = new Date(now.getTime() - NEW_DAYS * 86400000).toISOString();
+  const newCutoff = now.getTime() - NEW_DAYS * 86400000;
   const recentCutoff = new Date(now);
   recentCutoff.setFullYear(recentCutoff.getFullYear() - RECENT_YEARS);
-  const recentCutoffStr = recentCutoff.toISOString();
 
-  // ステップ1: 新着14日以内に未投稿があるか
-  const newPosts = await getWpPostsBatch({ after: newCutoff, perPage: 50 });
-  const newUnposted = newPosts.filter((p) => !postedIds.has(p.id));
+  // ステップ1: 新着14日以内、未投稿、新しい順
+  const newUnposted = all
+    .filter((p) => new Date(p.date).getTime() >= newCutoff)
+    .filter((p) => !postedIds.has(p.id))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
   if (newUnposted.length > 0) {
-    // 新着優先（最新）
     return { post: newUnposted[0], reason: "new" };
   }
 
-  // ステップ2: 3年以内のフォールバック（古い順から消化）
-  // 全件まとめて取って、未投稿のうち最も古いものを返す
-  let allPosts = [];
-  for (let page = 1; page <= 5; page++) {
-    const batch = await getWpPostsBatch({
-      after: recentCutoffStr,
-      before: now.toISOString(),
-      perPage: 100,
-      page,
-    });
-    if (!Array.isArray(batch) || batch.length === 0) break;
-    allPosts = allPosts.concat(batch);
-    if (batch.length < 100) break;
-  }
-  const recentUnposted = allPosts.filter((p) => !postedIds.has(p.id));
+  // ステップ2: 3年以内、未投稿、古い順から消化
+  const recentUnposted = all
+    .filter((p) => new Date(p.date) >= recentCutoff)
+    .filter((p) => !postedIds.has(p.id))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
   if (recentUnposted.length === 0) {
     return { post: null, reason: "exhausted" };
   }
-  // 古い順
-  recentUnposted.sort((a, b) => new Date(a.date) - new Date(b.date));
   return { post: recentUnposted[0], reason: "stock" };
 }
 
@@ -139,25 +126,10 @@ export async function getPostedIds(igUserId, igToken) {
   return ids;
 }
 
-async function getMediaUrl(mediaId) {
-  if (!mediaId) return null;
-  const m = await fetchJson(`${WP_BASE}/media/${mediaId}?_fields=source_url`);
-  return m.source_url;
-}
-
-function extractBodyImages(html) {
-  const imgs = [...html.matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => m[1]);
-  const seen = new Set();
-  return imgs.filter((u) => {
-    if (!u.includes("wp-content/uploads")) return false;
-    if (seen.has(u)) return false;
-    seen.add(u);
-    return true;
-  });
-}
-
 function buildCaption(post) {
-  const title = post.title.rendered
+  // titleはJSONキャッシュ時点で post.title.rendered or post.title (string)
+  const titleRaw = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
+  const title = titleRaw
     .replace(/&#8211;/g, "–")
     .replace(/&#8217;/g, "'")
     .replace(/&amp;/g, "&");
@@ -179,8 +151,12 @@ function buildCaption(post) {
 }
 
 export async function buildPostPayload(post) {
-  const featuredUrl = await getMediaUrl(post.featured_media);
-  const bodyImages = extractBodyImages(post.content.rendered);
+  // キャッシュJSONから来た場合は featured_url, body_images が既に展開済み
+  // CLI で WP API直叩き（--post-id）の場合は content.rendered + featured_media なので fallback
+  const featuredUrl = post.featured_url
+    ?? (post.featured_media ? await getMediaUrlFallback(post.featured_media) : null);
+  const bodyImages = post.body_images
+    ?? extractBodyImages(post.content?.rendered || "");
   const ordered = [];
   if (featuredUrl) ordered.push(featuredUrl);
   for (const u of bodyImages) {
@@ -189,6 +165,24 @@ export async function buildPostPayload(post) {
   const images = ordered.slice(0, MAX_IMAGES);
   const caption = buildCaption(post);
   return { images, caption };
+}
+
+// CLI から --post-id 指定時用のフォールバック（ローカル実行のみ）
+async function getMediaUrlFallback(mediaId) {
+  if (!mediaId) return null;
+  const m = await fetchJson(`${WP_BASE}/media/${mediaId}?_fields=source_url`);
+  return m.source_url;
+}
+
+function extractBodyImages(html) {
+  const imgs = [...html.matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => m[1]);
+  const seen = new Set();
+  return imgs.filter((u) => {
+    if (!u.includes("wp-content/uploads")) return false;
+    if (seen.has(u)) return false;
+    seen.add(u);
+    return true;
+  });
 }
 
 async function createMediaContainer(igUserId, igToken, opts) {
@@ -300,7 +294,8 @@ async function mainCli() {
     reason = sel.reason;
   }
 
-  console.log(`📰 #${post.id} (${reason}): ${post.title.rendered}`);
+  const titleStr = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
+  console.log(`📰 #${post.id} (${reason}): ${titleStr}`);
   console.log(`📅 ${post.date}`);
   console.log(`🔗 ${post.link}`);
 
