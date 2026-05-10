@@ -1,0 +1,36 @@
+name: WP Cache Update
+
+on:
+  schedule:
+    # JST 6:00 と 18:00（UTC 21:00 と 9:00）
+    - cron: '0 21 * * *'
+    - cron: '0 9 * * *'
+  workflow_dispatch: # 手動実行可能
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch WP cache
+        run: python3 .github/scripts/fetch_wp.py
+
+      - name: Commit & push if changed
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "No changes."
+          else
+            git commit -m "chore: update WP cache [skip ci]"
+            git push
+          fi

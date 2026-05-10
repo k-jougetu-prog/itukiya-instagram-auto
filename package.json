@@ -1,0 +1,14 @@
+{
+  "name": "itukiya-instagram-auto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "post:dry": "node scripts/post.js --dry",
+    "post:test": "node scripts/post.js --post-id=54210 --dry",
+    "post:run": "node scripts/post.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

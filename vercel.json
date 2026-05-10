@@ -1,0 +1,22 @@
+{
+  "headers": [
+    {
+      "source": "/intro/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/post",
+      "schedule": "0 0 * * 1,3,5"
+    }
+  ],
+  "functions": {
+    "api/cron/post.js": {
+      "maxDuration": 300
+    }
+  }
+}

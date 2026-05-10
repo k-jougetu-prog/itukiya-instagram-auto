@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>挨拶投稿プレビュー｜itukiya_reform_official</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Helvetica Neue", sans-serif;
+  background: #fafafa;
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+}
+.phone {
+  background: white;
+  width: 100%;
+  max-width: 470px;
+  border: 1px solid #dbdbdb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.header {
+  display: flex;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 1px solid #efefef;
+}
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #f0822a url('/intro/04_content.jpg') center/cover;
+  margin-right: 12px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px #f0822a;
+}
+.username {
+  font-weight: 600;
+  font-size: 14px;
+  color: #262626;
+}
+.username-small {
+  font-size: 11px;
+  color: #8e8e8e;
+  margin-top: 2px;
+}
+.menu-dots {
+  margin-left: auto;
+  font-size: 18px;
+  color: #262626;
+}
+.carousel {
+  position: relative;
+  background: #000;
+  aspect-ratio: 1 / 1;
+}
+.carousel img {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.carousel img.active {
+  opacity: 1;
+}
+.carousel-counter {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+.nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255,255,255,0.85);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: bold;
+  color: #262626;
+  border: none;
+  font-size: 16px;
+}
+.nav-btn:hover { background: white; }
+.nav-prev { left: 12px; }
+.nav-next { right: 12px; }
+.nav-btn.hidden { display: none; }
+.actions {
+  display: flex;
+  padding: 8px 14px;
+  font-size: 24px;
+  gap: 16px;
+}
+.actions .icon { cursor: pointer; }
+.bookmark { margin-left: auto; }
+.dots {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 0 8px;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c7c7c7;
+}
+.dot.active {
+  background: #1864ab;
+}
+.likes {
+  padding: 0 14px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #262626;
+}
+.caption {
+  padding: 8px 14px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #262626;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.caption .username {
+  display: inline;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.tag {
+  color: #00376b;
+}
+.posted-at {
+  padding: 0 14px 16px;
+  font-size: 11px;
+  color: #8e8e8e;
+  text-transform: uppercase;
+}
+.controls {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  padding: 14px 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+.controls .info {
+  color: #555;
+}
+.controls strong {
+  color: #f0822a;
+}
+.notice {
+  text-align: center;
+  padding: 10px;
+  background: #fff8ed;
+  color: #6b4a00;
+  font-size: 12px;
+  border-bottom: 1px solid #f0d893;
+}
+</style>
+</head>
+<body>
+
+<div class="phone">
+  <div class="notice">⚠️ これはプレビューです。実際のInstagram投稿の見た目を再現しています</div>
+  <div class="header">
+    <div class="avatar"></div>
+    <div>
+      <div class="username">itukiya_reform_official</div>
+      <div class="username-small">松阪市</div>
+    </div>
+    <div class="menu-dots">⋯</div>
+  </div>
+
+  <div class="carousel" id="carousel">
+    <img src="/intro/01_staff_wave.jpg" class="active" alt="1枚目：スタッフ手振り">
+    <img src="/intro/02_signboard.jpg" alt="2枚目：松阪中の看板">
+    <img src="/intro/03_philosophy.jpg" alt="3枚目：理念">
+    <img src="/intro/04_content.jpg" alt="4枚目：発信内容">
+    <div class="carousel-counter" id="counter">1/4</div>
+    <button class="nav-btn nav-prev hidden" id="prev">‹</button>
+    <button class="nav-btn nav-next" id="next">›</button>
+  </div>
+
+  <div class="actions">
+    <span class="icon">♡</span>
+    <span class="icon">💬</span>
+    <span class="icon">↗</span>
+    <span class="icon bookmark">🔖</span>
+  </div>
+
+  <div class="dots" id="dots">
+    <div class="dot active"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <div class="likes">いいね！0件</div>
+
+  <div class="caption">
+    <span class="username">itukiya_reform_official</span><span id="caption-text"></span>
+  </div>
+
+  <div class="posted-at">たった今</div>
+</div>
+
+<div class="controls">
+  <span class="info">📷 <strong id="current">1</strong>/4枚目</span>
+  <span class="info">⌨️ ←→キーで切替</span>
+</div>
+
+<script>
+const CAPTION = `【ご挨拶】株式会社いつき家、Instagram新公式アカウント開設しました🎉
+
+＼はじめまして／
+地元松阪市で創業29年✨
+リフォーム会社「いつき家」です。
+
+この度、地元の皆さまにもっと私たちのことを知っていただきたく、新しい公式Instagramを開設しました🏡
+
+1枚目の写真は、個性豊かなスタッフ一同です😊
+「どんな人がお家に来るんだろう…？」という不安を、私たちの笑顔で安心に変えたいと思っています。
+
+2枚目は、松阪市の中心街にあるいつき家の看板。
+おかげさまで、松阪市の皆さまに長年ご愛顧いただいています。
+
+【私たちの想い】
+🏡「松阪市民のため」のリフォーム会社
+✨「ありがとう」「笑顔」が集まる会社になる
+
+リフォームを通じて、お客様から「ありがとう」のお言葉をいただき、家族みんなが「笑顔」になれる空間をつくる。
+それが、いつき家の何よりの喜びであり、使命です。
+
+このアカウントでは
+✅ 劇的Before→After 施工事例（毎週月水金更新予定）
+✅ 失敗しないリフォームの豆知識
+✅ 現場の裏側やスタッフの日常
+
+など、皆さまのお役に立てる情報を発信していきます。
+
+📞0120-939-878（営業電話は一切かけません）
+🛡安心の10年間笑顔保証
+🕒営業時間 10:00-18:00／水曜定休
+
+お住まいの「困った」を「よかった」に変えるお手伝いをさせてください。
+
+ぜひ「フォロー」や「いいね」で応援していただけると嬉しいです！
+これからどうぞよろしくお願いいたします🙇‍♂️
+
+🏡 株式会社いつき家｜創業29年
+📍三重県松阪市大黒田町1799-3 三恵ビル1階
+📞0120-939-878
+
+#松阪リフォーム #松阪市リフォーム #いつき家 #三重県松阪市 #リフォーム会社 #リノベーション #初投稿 #はじめまして #公式アカウント #松阪市 #三重県 #創業29年 #地域密着 #笑顔リフォーム #10年保証`;
+
+// ハッシュタグを青色に
+const captionHtml = CAPTION
+  .replace(/(#[^\s#]+)/g, '<span class="tag">$1</span>')
+  .replace(/\n/g, '<br>');
+document.getElementById('caption-text').innerHTML = ' ' + captionHtml;
+
+// カルーセル制御
+const images = document.querySelectorAll('#carousel img');
+const dots = document.querySelectorAll('#dots .dot');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+const counter = document.getElementById('counter');
+const current = document.getElementById('current');
+let idx = 0;
+
+function update() {
+  images.forEach((img, i) => img.classList.toggle('active', i === idx));
+  dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+  counter.textContent = (idx + 1) + '/' + images.length;
+  current.textContent = idx + 1;
+  prevBtn.classList.toggle('hidden', idx === 0);
+  nextBtn.classList.toggle('hidden', idx === images.length - 1);
+}
+
+prevBtn.onclick = () => { if (idx > 0) { idx--; update(); } };
+nextBtn.onclick = () => { if (idx < images.length - 1) { idx++; update(); } };
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' && idx > 0) { idx--; update(); }
+  else if (e.key === 'ArrowRight' && idx < images.length - 1) { idx++; update(); }
+});
+
+// タッチスワイプ
+let touchStartX = 0;
+document.getElementById('carousel').addEventListener('touchstart', e => {
+  touchStartX = e.touches[0].clientX;
+});
+document.getElementById('carousel').addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  if (dx > 50 && idx > 0) { idx--; update(); }
+  else if (dx < -50 && idx < images.length - 1) { idx++; update(); }
+});
+</script>
+
+</body>
+</html>
