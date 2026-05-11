@@ -65,7 +65,9 @@ export default async function handler(req, res) {
 
 async function notifyChatwork(message) {
   const token = process.env.CHATWORK_TOKEN;
-  const roomId = process.env.CHATWORK_ROOM_ID;
+  // 週次レポートの送り先は専用ルーム（INSIGHTS_CHATWORK_ROOM_ID）優先。
+  // 未設定なら従来の CHATWORK_ROOM_ID にフォールバック。
+  const roomId = process.env.INSIGHTS_CHATWORK_ROOM_ID || process.env.CHATWORK_ROOM_ID;
   if (!token || !roomId) {
     console.log("[chatwork notify skipped]", message.slice(0, 200));
     return;
