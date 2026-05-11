@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/refresh-token",
       "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/cron/insights-weekly",
+      "schedule": "0 0 * * 1"
     }
   ],
   "functions": {
@@ -24,6 +28,9 @@
     },
     "api/cron/refresh-token.js": {
       "maxDuration": 60
+    },
+    "api/cron/insights-weekly.js": {
+      "maxDuration": 120
     }
   }
 }

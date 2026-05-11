@@ -6,7 +6,9 @@
   "scripts": {
     "post:dry": "node scripts/post.js --dry",
     "post:test": "node scripts/post.js --post-id=54210 --dry",
-    "post:run": "node scripts/post.js"
+    "post:run": "node scripts/post.js",
+    "insights:check": "node --env-file=.env.local scripts/insights.js --digest",
+    "insights:ai": "node --env-file=.env.local scripts/insights.js --ai --digest"
   },
   "engines": {
     "node": ">=20"
