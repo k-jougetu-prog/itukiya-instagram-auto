@@ -2,8 +2,7 @@
 // vercel.json の crons.path = "/api/cron/post" から呼ばれる
 
 import {
-  selectNextPost,
-  buildPostPayload,
+  pickPostablePost,
   postToInstagram,
   getPostedIds,
 } from "../../scripts/post.js";
@@ -26,16 +25,21 @@ export default async function handler(req, res) {
     // 1. 投稿済みID取得（IG自身の投稿履歴から）
     const postedIds = await getPostedIds(IG_USER_ID, IG_USER_TOKEN);
 
-    // 2. 投稿対象を選ぶ
-    const sel = await selectNextPost(postedIds);
-    if (!sel.post) {
-      const message = "対象事例なし（ストック消化完了 or 該当なし／要確認）";
-      await notifyChatwork(`⚠️ Instagram自動投稿: ${message}`);
-      return res.status(200).json({ ok: true, skipped: true, reason: message });
+    // 2. 「次に投稿すべき & 写真が成立する」記事を選ぶ（写真が薄い記事は飛ばす）
+    const pick = await pickPostablePost(postedIds);
+    const skippedNote = (pick.skipped || []).length
+      ? `\n（写真不足でスキップ：${pick.skipped.map((s) => `#${s.id} ${s.title}`.slice(0, 60)).join(" / ")}）`
+      : "";
+    if (!pick.post) {
+      const reasonText = pick.reason === "no-good-photos"
+        ? "投稿できる写真が揃った記事が見つかりませんでした（古い記事が連続で写真不足／要確認）"
+        : "対象事例なし（ストック消化完了 or 該当なし／要確認）";
+      await notifyChatwork(`⚠️ Instagram自動投稿: ${reasonText}${skippedNote}`);
+      return res.status(200).json({ ok: true, skipped: true, reason: pick.reason, skippedPosts: pick.skipped });
     }
 
-    // 3. ペイロード組み立て
-    const { images, caption } = await buildPostPayload(sel.post);
+    const { post, reason, images, caption, qc } = pick;
+    const titleStr = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
 
     // ?dry=1 でドライラン（投稿せず結果だけ返す）
     const isDry = req.query?.dry === "1" || req.url?.includes("dry=1");
@@ -43,19 +47,22 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         dryRun: true,
-        postId: sel.post.id,
-        reason: sel.reason,
-        title: typeof sel.post.title === "string" ? sel.post.title : (sel.post.title?.rendered || ""),
-        date: sel.post.date,
-        link: sel.post.link,
+        postId: post.id,
+        reason,
+        title: titleStr,
+        date: post.date,
+        link: post.link,
         images,
+        droppedImages: qc?.dropped || [],
+        qcNote: qc?.note || "",
+        skippedPosts: pick.skipped,
         captionLength: caption.length,
         captionPreview: caption.slice(0, 200),
         postedIdsCount: postedIds.size,
       });
     }
 
-    // 4. 投稿実行
+    // 3. 投稿実行
     const mediaId = await postToInstagram({
       images,
       caption,
@@ -63,28 +70,32 @@ export default async function handler(req, res) {
       igToken: IG_USER_TOKEN,
     });
 
-    // 5. Chatwork通知
-    const reasonLabel = sel.reason === "new" ? "新着" : "ストック消化";
+    // 4. Chatwork通知
+    const reasonLabel = reason === "new" ? "新着" : "ストック消化";
+    const droppedNote = (qc?.dropped || []).length ? `（QCで除外：${qc.dropped.length}枚${qc.note ? " / " + qc.note : ""}）` : "";
     const msg = [
       "[info][title]📷 Instagram投稿成功[/title]",
-      `事例：${typeof sel.post.title === "string" ? sel.post.title : (sel.post.title?.rendered || "")}`,
+      `事例：${titleStr}`,
       `区分：${reasonLabel}`,
-      `公開日：${sel.post.date.slice(0, 10)}`,
-      `画像：${images.length}枚`,
-      `HP：${sel.post.link}`,
+      `公開日：${(post.date || "").slice(0, 10)}`,
+      `画像：${images.length}枚${droppedNote}`,
+      `HP：${post.link}`,
       `IG ：https://www.instagram.com/itukiya_reform_official/`,
       `MediaID：${mediaId}`,
       "[/info]",
+      ...((pick.skipped || []).length ? [`※写真不足でスキップした記事：${pick.skipped.map((s) => `#${s.id} ${s.title}`).join(" / ")}`] : []),
     ].join("\n");
     await notifyChatwork(msg);
 
     return res.status(200).json({
       ok: true,
       mediaId,
-      postId: sel.post.id,
-      reason: sel.reason,
-      title: typeof sel.post.title === "string" ? sel.post.title : (sel.post.title?.rendered || ""),
+      postId: post.id,
+      reason,
+      title: titleStr,
       images: images.length,
+      droppedImages: qc?.dropped?.length || 0,
+      skippedPosts: pick.skipped,
       postedIdsCount: postedIds.size,
     });
   } catch (e) {

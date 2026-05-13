@@ -35,6 +35,14 @@ const NEW_DAYS = 14; // 「新着」判定の日数（公開からの日数）
 // 環境変数 STOCK_SINCE で前倒しできる（例 "2022-01-01"）。
 const STOCK_SINCE = process.env.STOCK_SINCE || "2023-01-01";
 
+// 写真の品質チェック（昔の自作記事は写真が少なかったり質が粗いことがあるため、
+// 「中途半端な写真は採用しない／そういう記事は飛ばす」を AI で機械的にやる）
+const MIN_GOOD_IMAGES = 2; // 選別後この枚数を下回ったらその記事はスキップして次へ
+const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
+const PHOTO_QC_MODEL = process.env.PHOTO_QC_MODEL || "claude-sonnet-4-6"; // 写真の良し悪し判定
+const PHOTO_QC_MAX_TRIES = 12; // ストック消化時、写真が薄い記事を最大何件まで読み飛ばすか
+const PHOTO_QC = process.env.PHOTO_QC !== "0"; // "0" で品質チェック無効化（フォールバック用）
+
 // XSERVER WAFがVercel Functions経由のWP直叩きを403でブロックするため、
 // GitHub Actionsで定期キャッシュしたJSONを使う
 const CACHE_URL = "https://raw.githubusercontent.com/k-jougetu-prog/itukiya-instagram-auto/main/data/sekou.json";
@@ -82,13 +90,14 @@ export async function fetchSekouCache() {
  * @param {Set<number>} postedIds - 投稿済みのpost_idセット
  * @returns {Promise<{post: object|null, reason: string}>}
  */
-export async function selectNextPost(postedIds = new Set()) {
+export async function selectNextPost(postedIds = new Set(), extraExcludes = new Set()) {
   const all = await fetchSekouCache();
   const now = new Date();
   const newCutoff = now.getTime() - NEW_DAYS * 86400000;
   const stockSince = new Date(`${STOCK_SINCE}T00:00:00+09:00`);
 
-  const isExcluded = (p) => postedIds.has(p.id) || IGNORE_POST_IDS.has(p.id);
+  const isExcluded = (p) =>
+    postedIds.has(p.id) || IGNORE_POST_IDS.has(p.id) || extraExcludes.has(p.id);
 
   // ステップ1: 新着14日以内、未投稿、新しい順
   const newUnposted = all
@@ -166,53 +175,107 @@ function buildCaption(post) {
   ].join("\n");
 }
 
+// 同じ写真のサイズ違い（…-900x675.jpg / …-scaled.jpg 等）を同一視するためのキー。
+// 例: IMG_0674.jpg と IMG_0674-900x675.jpg → 同じ「IMG_0674」 → カルーセルで重複させない
+function imageDedupKey(url) {
+  try {
+    let name = new URL(url).pathname.split("/").pop() || url;
+    name = name.replace(/\.[a-z0-9]+$/i, "");          // 拡張子除去
+    name = name.replace(/-scaled$/i, "");               // WordPressの -scaled
+    name = name.replace(/-\d{2,5}x\d{2,5}$/i, "");      // -900x675 等のサイズ接尾辞
+    return name.toLowerCase();
+  } catch {
+    return url;
+  }
+}
+
 /**
- * 画像をafter優先で並び替える。
+ * 画像をafter優先で並び替える。サイズ違いの重複は除去する。
  * - 1枚目: featured（アイキャッチ＝メイン完成カット）
  * - 2枚目以降: after優先で並べつつ、before も対比として混ぜる
  */
 function reorderImages(featuredUrl, bodyImages, max) {
-  const seen = new Set();
+  const seenKeys = new Set();
   const result = [];
-  if (featuredUrl) {
-    result.push(featuredUrl);
-    seen.add(featuredUrl);
-  }
+  const tryPush = (u) => {
+    if (!u || result.length >= max) return;
+    const k = imageDedupKey(u);
+    if (seenKeys.has(k)) return;
+    seenKeys.add(k);
+    result.push(u);
+  };
+  tryPush(featuredUrl);
+
   const isAfter = (u) => /[\/\-_.]after[\/\-_.]/i.test(u);
   const isBefore = (u) => /[\/\-_.]before[\/\-_.]/i.test(u);
+  const remaining = bodyImages.filter((u) => !seenKeys.has(imageDedupKey(u)));
+  const afters = remaining.filter(isAfter);
+  const befores = remaining.filter(isBefore);
+  const others = remaining.filter((u) => !isAfter(u) && !isBefore(u));
 
-  const afters = bodyImages.filter((u) => isAfter(u) && !seen.has(u));
-  const befores = bodyImages.filter((u) => isBefore(u) && !seen.has(u));
-  const others = bodyImages.filter((u) => !isAfter(u) && !isBefore(u) && !seen.has(u));
-
-  // ファイル名に before/after が含まれる事例 → after優先＋before少量で対比
-  if (afters.length > 0 || befores.length > 0) {
-    // After 2枚 → Before 2枚 → 残りafter → その他、の順
-    const queue = [
-      ...afters.slice(0, 2),
-      ...befores.slice(0, 2),
-      ...afters.slice(2),
-      ...others,
-      ...befores.slice(2),
-    ];
-    for (const u of queue) {
-      if (result.length >= max) break;
-      if (!seen.has(u)) {
-        result.push(u);
-        seen.add(u);
-      }
-    }
-  } else {
+  const queue = (afters.length > 0 || befores.length > 0)
+    // ファイル名に before/after が含まれる事例 → After2枚 → Before2枚 → 残りafter → その他 → 残りbefore
+    ? [...afters.slice(0, 2), ...befores.slice(0, 2), ...afters.slice(2), ...others, ...befores.slice(2)]
     // before/after判定なしの事例 → 本文順（従来動作）
-    for (const u of bodyImages) {
-      if (result.length >= max) break;
-      if (!seen.has(u)) {
-        result.push(u);
-        seen.add(u);
-      }
-    }
-  }
+    : bodyImages;
+  for (const u of queue) tryPush(u);
   return result.slice(0, max);
+}
+
+/**
+ * 候補画像を Claude（vision）に見せて「施工事例カルーセルに出して見栄えする写真」だけ残す。
+ * 昔の自作記事の粗い写真・何だかわからない写真を機械的に弾くのが目的。迷ったら落とす方針。
+ * API失敗時は「落とさない（元のまま）」でフォールバック（パイプラインを止めない）。
+ * @returns {Promise<{kept: string[], dropped: string[], note: string}>}
+ */
+export async function curateImages(images, post) {
+  if (!PHOTO_QC || !images.length) return { kept: images, dropped: [], note: "QCスキップ" };
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { kept: images, dropped: [], note: "ANTHROPIC_API_KEY未設定→QCスキップ" };
+
+  const titleStr = (typeof post?.title === "string" ? post.title : post?.title?.rendered || "").slice(0, 80);
+  const content = [
+    {
+      type: "text",
+      text: [
+        "あなたはリフォーム会社の公式Instagram（施工事例カルーセル）の品質チェック担当です。",
+        `記事「${titleStr}」の投稿候補写真を 1枚目から ${images.length} 枚見せます。各写真の直前に【写真N】と番号を付けています。`,
+        "やることは『明らかにダメな写真を取り除く』だけです。キュレーション（ベストを選ぶ）ではありません。",
+        "■ 原則：基本は全部 keep。少しでも施工箇所（外壁・屋根・水廻り・内装・外構・玄関・サッシ等）や完成の様子が普通に見て取れるなら採用。迷ったら必ず keep。",
+        "■ drop（落とす）に入れるのは次のような明白なNGだけ：ブレている／ピンボケ／極端に暗い・白飛びで内容が見えない／何を撮ったのか本当に判別できない／施工と無関係（人物のスナップ・車・看板・室内で人が主役、書類や図面のスクショ、PC/スマホ画面のキャプチャ等）／画質が極端に粗く投稿に耐えない。",
+        "■ 次の程度の理由では drop しない：『他にもっと良い写真がある』『似た構図がある』『ディテールに寄りすぎ』『画角がやや狭い』『生活感が少し写る』『プロのライターが撮ったものではなさそう』など。素人写真でも内容が分かれば keep。",
+        "■ 1枚目はアイキャッチ（記事のメイン完成カット）。よほど崩れていない限り keep。",
+        '出力は JSON のみ・前置きや解説は一切なし。形式: {"keep":[採用する写真番号を昇順],"drop":[落とす写真番号],"note":"dropした理由を一言・無ければ空文字（40字以内）"}',
+      ].join("\n"),
+    },
+    ...images.map((url, i) => ([
+      { type: "text", text: `【写真${i + 1}】` },
+      { type: "image", source: { type: "url", url } },
+    ])).flat(),
+  ];
+
+  let parsed;
+  try {
+    const r = await fetch(ANTHROPIC_API, {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: PHOTO_QC_MODEL, max_tokens: 300, messages: [{ role: "user", content }] }),
+    });
+    const text = await r.text();
+    if (!r.ok) return { kept: images, dropped: [], note: `QC失敗(HTTP ${r.status})→全採用` };
+    const j = JSON.parse(text);
+    const out = (j.content || []).filter((c) => c.type === "text").map((c) => c.text).join("").trim();
+    const m = out.match(/\{[\s\S]*\}/);
+    parsed = m ? JSON.parse(m[0]) : null;
+  } catch (e) {
+    return { kept: images, dropped: [], note: `QC例外(${e.message})→全採用` };
+  }
+  if (!parsed || !Array.isArray(parsed.keep)) return { kept: images, dropped: [], note: "QC応答不正→全採用" };
+
+  const keepIdx = new Set(parsed.keep.map((n) => Number(n) - 1).filter((i) => Number.isInteger(i) && i >= 0 && i < images.length));
+  const kept = images.filter((_, i) => keepIdx.has(i));
+  const dropped = images.filter((_, i) => !keepIdx.has(i));
+  return { kept, dropped, note: (parsed.note || "").toString().slice(0, 60) };
 }
 
 export async function buildPostPayload(post) {
@@ -222,9 +285,34 @@ export async function buildPostPayload(post) {
     ?? (post.featured_media ? await getMediaUrlFallback(post.featured_media) : null);
   const bodyImages = post.body_images
     ?? extractBodyImages(post.content?.rendered || "");
-  const images = reorderImages(featuredUrl, bodyImages, MAX_IMAGES);
+  const candidates = reorderImages(featuredUrl, bodyImages, MAX_IMAGES);
+  const qc = await curateImages(candidates, post);
+  const images = qc.kept;
   const caption = buildCaption(post);
-  return { images, caption };
+  return { images, caption, candidates, qc };
+}
+
+/**
+ * 「次に投稿すべき、かつ写真が成立する」記事を選ぶ。
+ * 選んだ記事の写真が選別後 MIN_GOOD_IMAGES 未満なら、その記事は飛ばして次の候補へ（最大 PHOTO_QC_MAX_TRIES 回）。
+ * @returns {Promise<{post:object, reason:string, images:string[], caption:string, qc:object, skipped:Array}|{post:null, reason:string, skipped:Array}>}
+ */
+export async function pickPostablePost(postedIds = new Set()) {
+  const extraExcludes = new Set();
+  const skipped = [];
+  for (let i = 0; i < PHOTO_QC_MAX_TRIES; i++) {
+    const sel = await selectNextPost(postedIds, extraExcludes);
+    if (!sel.post) return { post: null, reason: sel.reason, skipped };
+    const payload = await buildPostPayload(sel.post);
+    if (payload.images.length >= MIN_GOOD_IMAGES) {
+      return { post: sel.post, reason: sel.reason, images: payload.images, caption: payload.caption, qc: payload.qc, skipped };
+    }
+    // 写真が薄い → この記事は今回スキップして次へ
+    const titleStr = typeof sel.post.title === "string" ? sel.post.title : (sel.post.title?.rendered || "");
+    skipped.push({ id: sel.post.id, title: titleStr, date: (sel.post.date || "").slice(0, 10), kept: payload.images.length, dropped: payload.qc?.dropped?.length ?? 0 });
+    extraExcludes.add(sel.post.id);
+  }
+  return { post: null, reason: "no-good-photos", skipped };
 }
 
 // CLI から --post-id 指定時用のフォールバック（ローカル実行のみ）
@@ -340,18 +428,26 @@ async function mainCli() {
 
   let post;
   let reason = "manual";
+  let images, caption, qc, candidates;
   if (POST_ID) {
     post = await fetchJson(`${WP_BASE}/posts/${POST_ID}`);
+    ({ images, caption, qc, candidates } = await buildPostPayload(post));
   } else {
     const postedIds = await getPostedIds(IG_USER_ID, IG_USER_TOKEN);
     console.log(`📌 既投稿: ${postedIds.size}件`);
-    const sel = await selectNextPost(postedIds);
-    if (!sel.post) {
-      console.log(`⚠️  対象事例なし（${STOCK_SINCE}以降の未投稿ストックを消化完了 or 該当なし）`);
+    const pick = await pickPostablePost(postedIds);
+    if (pick.skipped?.length) {
+      console.log(`⏭️  写真不足でスキップ: ${pick.skipped.map((s) => `#${s.id}(${s.date}) ${s.title}`).join(" / ")}`);
+    }
+    if (!pick.post) {
+      console.log(`⚠️  投稿対象なし（${pick.reason}）`);
       return;
     }
-    post = sel.post;
-    reason = sel.reason;
+    post = pick.post;
+    reason = pick.reason;
+    images = pick.images;
+    caption = pick.caption;
+    qc = pick.qc;
   }
 
   const titleStr = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
@@ -359,9 +455,16 @@ async function mainCli() {
   console.log(`📅 ${post.date}`);
   console.log(`🔗 ${post.link}`);
 
-  const { images, caption } = await buildPostPayload(post);
+  if (qc?.dropped?.length) {
+    console.log(`🧹 QC除外 ${qc.dropped.length}枚${qc.note ? " (" + qc.note + ")" : ""}:`);
+    qc.dropped.forEach((u) => console.log(`   ✗ ${u}`));
+  }
   console.log(`🖼️  Images (${images.length}/${MAX_IMAGES}):`);
   images.forEach((u, i) => console.log(`   ${i + 1}. ${u}`));
+  if (!images.length) {
+    console.log("⚠️  採用画像0枚。投稿しません。");
+    return;
+  }
   console.log(`\n📝 Caption (${caption.length} chars):`);
   console.log(caption);
   console.log("---");
