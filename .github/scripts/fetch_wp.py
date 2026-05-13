@@ -94,6 +94,28 @@ def enrich_post(post):
     }
 
 
+def write_cache(out_path, items):
+    """取得0件のときは既存の良いキャッシュを上書きしない（壊さない）。
+
+    XSERVER NinjaFirewall が GitHub Actions / Vercel のデータセンターIPを
+    403 で弾くため、CI上では fetch が0件になることがある。その値で上書きすると
+    自動投稿のソースが空になり「3年以内ストック消化完了」になってしまう。
+    → 0件なら既存ファイルを温存し、CIをエラー終了させて気づけるようにする。
+    """
+    if not items:
+        if os.path.exists(out_path):
+            print(f"⚠️  {out_path}: 取得0件のため上書きしません（既存キャッシュを温存）")
+        else:
+            print(f"⚠️  {out_path}: 取得0件かつ既存キャッシュなし")
+        return False
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump({"updated_at": timestamp, "count": len(items), "posts": items},
+                  f, ensure_ascii=False, indent=2)
+    print(f"✅ {out_path} ({len(items)})")
+    return True
+
+
 def main():
     print("📥 施工事例（cat=7）取得中...")
     sekou_raw = fetch_posts(SEKOU_CATEGORY)
@@ -105,20 +127,12 @@ def main():
     print(f"   {len(news_raw)}件")
     news = [enrich_post(p) for p in news_raw]
 
-    timestamp = datetime.now(timezone.utc).isoformat()
+    ok_sekou = write_cache(os.path.join(OUT_DIR, "sekou.json"), sekou)
+    write_cache(os.path.join(OUT_DIR, "news.json"), news)
 
-    sekou_out = os.path.join(OUT_DIR, "sekou.json")
-    news_out = os.path.join(OUT_DIR, "news.json")
-
-    with open(sekou_out, "w", encoding="utf-8") as f:
-        json.dump({"updated_at": timestamp, "count": len(sekou), "posts": sekou},
-                  f, ensure_ascii=False, indent=2)
-    with open(news_out, "w", encoding="utf-8") as f:
-        json.dump({"updated_at": timestamp, "count": len(news), "posts": news},
-                  f, ensure_ascii=False, indent=2)
-
-    print(f"✅ {sekou_out} ({len(sekou)})")
-    print(f"✅ {news_out} ({len(news)})")
+    # 施工事例が0件 = ほぼ間違いなくWP側のブロック。CIを赤くして気づけるように。
+    if not ok_sekou:
+        raise SystemExit("施工事例の取得に失敗（WP REST APIが0件 / 403の可能性）。既存キャッシュは温存済み。")
 
 
 if __name__ == "__main__":
