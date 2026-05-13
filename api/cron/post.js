@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     // 2. 投稿対象を選ぶ
     const sel = await selectNextPost(postedIds);
     if (!sel.post) {
-      const message = "対象事例なし（3年以内ストック消化完了）";
+      const message = "対象事例なし（ストック消化完了 or 該当なし／要確認）";
       await notifyChatwork(`⚠️ Instagram自動投稿: ${message}`);
       return res.status(200).json({ ok: true, skipped: true, reason: message });
     }

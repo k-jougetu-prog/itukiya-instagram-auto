@@ -29,7 +29,11 @@ const SEKOU_CATEGORY = 7;
 const GRAPH = "https://graph.instagram.com/v21.0";
 const MAX_IMAGES = 5; // インスタは最大10だがHP誘導を優先して5枚に制限
 const NEW_DAYS = 14; // 「新着」判定の日数（公開からの日数）
-const RECENT_YEARS = 3; // フォールバック対象期間（年）
+// ストック消化の対象開始日。新着がない時はこの日以降の未投稿事例を古い順に投げる。
+// 2023年初頭の物件にもまだ魅力的なものが多いので固定日にしている（ローリング3年窓だと
+// 時間が経つと2023年前半が対象外に落ちてしまうため）。さらに古いものまで遡りたくなったら
+// 環境変数 STOCK_SINCE で前倒しできる（例 "2022-01-01"）。
+const STOCK_SINCE = process.env.STOCK_SINCE || "2023-01-01";
 
 // XSERVER WAFがVercel Functions経由のWP直叩きを403でブロックするため、
 // GitHub Actionsで定期キャッシュしたJSONを使う
@@ -82,8 +86,7 @@ export async function selectNextPost(postedIds = new Set()) {
   const all = await fetchSekouCache();
   const now = new Date();
   const newCutoff = now.getTime() - NEW_DAYS * 86400000;
-  const recentCutoff = new Date(now);
-  recentCutoff.setFullYear(recentCutoff.getFullYear() - RECENT_YEARS);
+  const stockSince = new Date(`${STOCK_SINCE}T00:00:00+09:00`);
 
   const isExcluded = (p) => postedIds.has(p.id) || IGNORE_POST_IDS.has(p.id);
 
@@ -96,15 +99,15 @@ export async function selectNextPost(postedIds = new Set()) {
     return { post: newUnposted[0], reason: "new" };
   }
 
-  // ステップ2: 3年以内、未投稿、古い順から消化
-  const recentUnposted = all
-    .filter((p) => new Date(p.date) >= recentCutoff)
+  // ステップ2: STOCK_SINCE以降の未投稿を「古い順」から消化（＝2023年初頭の物件から順番に）
+  const stockUnposted = all
+    .filter((p) => new Date(p.date) >= stockSince)
     .filter((p) => !isExcluded(p))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
-  if (recentUnposted.length === 0) {
+  if (stockUnposted.length === 0) {
     return { post: null, reason: "exhausted" };
   }
-  return { post: recentUnposted[0], reason: "stock" };
+  return { post: stockUnposted[0], reason: "stock" };
 }
 
 /**
@@ -344,7 +347,7 @@ async function mainCli() {
     console.log(`📌 既投稿: ${postedIds.size}件`);
     const sel = await selectNextPost(postedIds);
     if (!sel.post) {
-      console.log("⚠️  対象事例なし（3年以内ストック消化完了 or 該当なし）");
+      console.log(`⚠️  対象事例なし（${STOCK_SINCE}以降の未投稿ストックを消化完了 or 該当なし）`);
       return;
     }
     post = sel.post;
