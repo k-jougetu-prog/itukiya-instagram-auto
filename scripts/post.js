@@ -47,6 +47,23 @@ const PHOTO_QC = process.env.PHOTO_QC !== "0"; // "0" で品質チェック無�
 // GitHub Actionsで定期キャッシュしたJSONを使う
 const CACHE_URL = "https://raw.githubusercontent.com/k-jougetu-prog/itukiya-instagram-auto/main/data/sekou.json";
 
+// Instagram Graph API が itukiya.jp の画像を直接取得すると稀に
+// 「メディアURIが要件を満たしていません」(code 9004 / subcode 2207052) を返す
+// （2023年初頭のiPhone写真でEXIF orientation=0など、Meta側のfetcherがコケる）。
+// IMG_PROXY_BASE を設定すると、IGに渡す画像URLを /api/img プロキシ経由に書き換える。
+// 例: IMG_PROXY_BASE="https://itukiya-instagram-auto.vercel.app/api/img"
+const IMG_PROXY_BASE = process.env.IMG_PROXY_BASE || "";
+function maybeProxyUrl(u) {
+  if (!IMG_PROXY_BASE || !u) return u;
+  try {
+    const parsed = new URL(u);
+    if (parsed.hostname !== "itukiya.jp") return u;
+    return `${IMG_PROXY_BASE}?u=${encodeURIComponent(u)}`;
+  } catch {
+    return u;
+  }
+}
+
 // 「投稿してIGから削除した」記事は再投稿しない（IG履歴からは消えてるため自動再投稿を防ぐ）
 const IGNORE_POST_IDS = new Set([
   54210, // O様邸 外構補修工事（2026-05-10 テスト投稿→削除）
@@ -379,10 +396,12 @@ async function waitForReady(igToken, containerId, maxSec = 90) {
  */
 export async function postToInstagram({ images, caption, igUserId, igToken }) {
   if (!images.length) throw new Error("No images");
+  // Meta側fetcher都合での取得失敗回避：IMG_PROXY_BASE設定時はプロキシURLに変換
+  const igImages = images.map(maybeProxyUrl);
 
-  if (images.length === 1) {
+  if (igImages.length === 1) {
     const cid = await createMediaContainer(igUserId, igToken, {
-      imageUrl: images[0],
+      imageUrl: igImages[0],
       caption,
     });
     await waitForReady(igToken, cid);
@@ -391,7 +410,7 @@ export async function postToInstagram({ images, caption, igUserId, igToken }) {
 
   // カルーセル
   const childIds = [];
-  for (const u of images) {
+  for (const u of igImages) {
     const cid = await createMediaContainer(igUserId, igToken, {
       imageUrl: u,
       isCarouselItem: true,
