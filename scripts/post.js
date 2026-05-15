@@ -393,37 +393,66 @@ async function waitForReady(igToken, containerId, maxSec = 90) {
 
 /**
  * Instagram投稿実行
+ * - カルーセル時、1枚失敗してもMIN_FOR_CAROUSEL(=2)枚残れば続行
+ * - 失敗した画像URLは返り値の failedImages に積む（呼び出し側で通知に使える）
  */
 export async function postToInstagram({ images, caption, igUserId, igToken }) {
   if (!images.length) throw new Error("No images");
   // Meta側fetcher都合での取得失敗回避：IMG_PROXY_BASE設定時はプロキシURLに変換
   const igImages = images.map(maybeProxyUrl);
+  const failedImages = []; // [{ index, url, originalUrl, error }]
 
   if (igImages.length === 1) {
-    const cid = await createMediaContainer(igUserId, igToken, {
-      imageUrl: igImages[0],
-      caption,
-    });
-    await waitForReady(igToken, cid);
-    return await publishMedia(igUserId, igToken, cid);
+    try {
+      const cid = await createMediaContainer(igUserId, igToken, {
+        imageUrl: igImages[0],
+        caption,
+      });
+      await waitForReady(igToken, cid);
+      const mediaId = await publishMedia(igUserId, igToken, cid);
+      return { mediaId, failedImages };
+    } catch (e) {
+      e.failedImages = [{ index: 0, url: igImages[0], originalUrl: images[0], error: e.message }];
+      throw e;
+    }
   }
 
-  // カルーセル
+  // カルーセル：1枚ずつ作って、失敗したらスキップして次へ
+  const MIN_FOR_CAROUSEL = 2;
   const childIds = [];
-  for (const u of igImages) {
-    const cid = await createMediaContainer(igUserId, igToken, {
-      imageUrl: u,
-      isCarouselItem: true,
-    });
-    childIds.push(cid);
+  for (let i = 0; i < igImages.length; i++) {
+    const u = igImages[i];
+    try {
+      const cid = await createMediaContainer(igUserId, igToken, {
+        imageUrl: u,
+        isCarouselItem: true,
+      });
+      childIds.push(cid);
+    } catch (e) {
+      failedImages.push({ index: i, url: u, originalUrl: images[i], error: e.message });
+      console.warn(`⚠️ 子コンテナ作成失敗 (${i + 1}枚目): ${images[i]} → ${e.message}`);
+    }
   }
-  const carouselId = await createMediaContainer(igUserId, igToken, {
-    mediaType: "CAROUSEL",
-    children: childIds,
-    caption,
-  });
-  await waitForReady(igToken, carouselId);
-  return await publishMedia(igUserId, igToken, carouselId);
+  if (childIds.length < MIN_FOR_CAROUSEL) {
+    const err = new Error(
+      `カルーセル投稿に必要な枚数(${MIN_FOR_CAROUSEL})に満たず：${childIds.length}/${igImages.length}枚成功`,
+    );
+    err.failedImages = failedImages;
+    throw err;
+  }
+  try {
+    const carouselId = await createMediaContainer(igUserId, igToken, {
+      mediaType: "CAROUSEL",
+      children: childIds,
+      caption,
+    });
+    await waitForReady(igToken, carouselId);
+    const mediaId = await publishMedia(igUserId, igToken, carouselId);
+    return { mediaId, failedImages };
+  } catch (e) {
+    e.failedImages = failedImages;
+    throw e;
+  }
 }
 
 // ===== CLIエントリポイント =====
@@ -493,13 +522,17 @@ async function mainCli() {
     return;
   }
 
-  const mediaId = await postToInstagram({
+  const { mediaId, failedImages } = await postToInstagram({
     images,
     caption,
     igUserId: IG_USER_ID,
     igToken: IG_USER_TOKEN,
   });
   console.log(`✅ Published! Media ID: ${mediaId}`);
+  if (failedImages?.length) {
+    console.log(`⚠️ ${failedImages.length}枚はスキップ:`);
+    failedImages.forEach((f) => console.log(`   ✗ [${f.index + 1}枚目] ${f.originalUrl}\n     ${f.error}`));
+  }
   console.log(`👀 https://www.instagram.com/itukiya_reform_official/`);
 }
 

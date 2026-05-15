@@ -21,12 +21,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Missing IG credentials" });
   }
 
+  // catch から事故時の文脈（記事ID/URL）を通知に含めるため、外側スコープに置く
+  let post = null;
+  let pick = null;
   try {
     // 1. 投稿済みID取得（IG自身の投稿履歴から）
     const postedIds = await getPostedIds(IG_USER_ID, IG_USER_TOKEN);
 
     // 2. 「次に投稿すべき & 写真が成立する」記事を選ぶ（写真が薄い記事は飛ばす）
-    const pick = await pickPostablePost(postedIds);
+    pick = await pickPostablePost(postedIds);
     const skippedNote = (pick.skipped || []).length
       ? `\n（写真不足でスキップ：${pick.skipped.map((s) => `#${s.id} ${s.title}`.slice(0, 60)).join(" / ")}）`
       : "";
@@ -38,7 +41,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, skipped: true, reason: pick.reason, skippedPosts: pick.skipped });
     }
 
-    const { post, reason, images, caption, qc } = pick;
+    post = pick.post;
+    const { reason, images, caption, qc } = pick;
     const titleStr = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
 
     // ?dry=1 でドライラン（投稿せず結果だけ返す）
@@ -63,7 +67,7 @@ export default async function handler(req, res) {
     }
 
     // 3. 投稿実行
-    const mediaId = await postToInstagram({
+    const { mediaId, failedImages } = await postToInstagram({
       images,
       caption,
       igUserId: IG_USER_ID,
@@ -73,17 +77,21 @@ export default async function handler(req, res) {
     // 4. Chatwork通知
     const reasonLabel = reason === "new" ? "新着" : "ストック消化";
     const droppedNote = (qc?.dropped || []).length ? `（QCで除外：${qc.dropped.length}枚${qc.note ? " / " + qc.note : ""}）` : "";
+    const failedNote = (failedImages || []).length
+      ? `\n※IG取得失敗で除外：${failedImages.length}枚\n${failedImages.map((f) => `  - [${f.index + 1}枚目] ${f.originalUrl} (${f.error})`).join("\n")}`
+      : "";
     const msg = [
       "[info][title]📷 Instagram投稿成功[/title]",
       `事例：${titleStr}`,
       `区分：${reasonLabel}`,
       `公開日：${(post.date || "").slice(0, 10)}`,
-      `画像：${images.length}枚${droppedNote}`,
+      `画像：${images.length - (failedImages?.length || 0)}/${images.length}枚${droppedNote}`,
       `HP：${post.link}`,
       `IG ：https://www.instagram.com/itukiya_reform_official/`,
       `MediaID：${mediaId}`,
       "[/info]",
       ...((pick.skipped || []).length ? [`※写真不足でスキップした記事：${pick.skipped.map((s) => `#${s.id} ${s.title}`).join(" / ")}`] : []),
+      ...(failedNote ? [failedNote] : []),
     ].join("\n");
     await notifyChatwork(msg);
 
@@ -95,13 +103,28 @@ export default async function handler(req, res) {
       title: titleStr,
       images: images.length,
       droppedImages: qc?.dropped?.length || 0,
+      failedImages: failedImages || [],
       skippedPosts: pick.skipped,
       postedIdsCount: postedIds.size,
     });
   } catch (e) {
-    const errMsg = `❌ Instagram自動投稿エラー: ${e.message}\n${(e.body && JSON.stringify(e.body)) || ""}`;
+    // 失敗時はpost情報と失敗画像も通知に含める（事後復旧の判断材料）
+    const ctx = [];
+    if (post) {
+      ctx.push(`記事：#${post.id} ${typeof post.title === "string" ? post.title : (post.title?.rendered || "")}`);
+      if (post.link) ctx.push(`HP：${post.link}`);
+    }
+    if (e.failedImages?.length) {
+      ctx.push(`失敗画像 ${e.failedImages.length}枚：`);
+      e.failedImages.forEach((f) => ctx.push(`  - [${f.index + 1}枚目] ${f.originalUrl}`));
+    }
+    const errMsg = [
+      `❌ Instagram自動投稿エラー: ${e.message}`,
+      ...ctx,
+      e.body ? JSON.stringify(e.body).slice(0, 800) : "",
+    ].filter(Boolean).join("\n");
     await notifyChatwork(errMsg);
-    return res.status(500).json({ error: e.message, body: e.body });
+    return res.status(500).json({ error: e.message, body: e.body, failedImages: e.failedImages });
   }
 }
 
