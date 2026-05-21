@@ -12,7 +12,10 @@ from datetime import datetime, timezone
 WP_BASE = "https://itukiya.jp/wp-json/wp/v2"
 SEKOU_CATEGORY = 7    # 施工事例
 NEWS_CATEGORY = 663   # お知らせ
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 OUT_DIR = "data"
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -21,7 +24,9 @@ os.makedirs(OUT_DIR, exist_ok=True)
 def fetch_json(url):
     req = urllib.request.Request(url, headers={
         "User-Agent": USER_AGENT,
-        "Accept": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://itukiya.jp/",
     })
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
