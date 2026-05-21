@@ -1,11 +1,11 @@
 name: WP Cache Update
 
+# 2026-05-21: XSERVER NinjaFirewall が GitHub Actions のIPレンジを丸ごと403で
+# 弾くようになったため、定期実行を停止。Mac上のlaunchd（com.itukiya.wpcache）
+# に役割を移譲した。workflow_dispatch だけ残し、万一手元Macが死んでいる時の
+# 緊急避難用に保持する（403になる可能性が高いことに注意）。
 on:
-  schedule:
-    # JST 6:00 と 18:00（UTC 21:00 と 9:00）
-    - cron: '0 21 * * *'
-    - cron: '0 9 * * *'
-  workflow_dispatch: # 手動実行可能
+  workflow_dispatch: # 手動実行のみ
 
 jobs:
   update:
