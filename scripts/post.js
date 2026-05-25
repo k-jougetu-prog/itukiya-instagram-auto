@@ -242,27 +242,37 @@ function reorderImages(featuredUrl, bodyImages, max) {
 /**
  * 候補画像を Claude（vision）に見せて「施工事例カルーセルに出して見栄えする写真」だけ残す。
  * 昔の自作記事の粗い写真・何だかわからない写真を機械的に弾くのが目的。迷ったら落とす方針。
+ * 同じ呼び出しで Before/After 分類 も同時に取得する（カルーセル並び替え用、追加コストなし）。
+ * - after: 施工後と判定できる写真番号（hero映え順＝1番目を1枚目候補にしたい順）
+ * - before: 施工前と判定できる写真番号
+ * - 未掲載の番号は「unknown/middle」扱い（プロセス中・部材アップ等）
  * API失敗時は「落とさない（元のまま）」でフォールバック（パイプラインを止めない）。
- * @returns {Promise<{kept: string[], dropped: string[], note: string}>}
+ * @returns {Promise<{kept: string[], dropped: string[], note: string, after: string[], before: string[]}>}
  */
 export async function curateImages(images, post) {
-  if (!PHOTO_QC || !images.length) return { kept: images, dropped: [], note: "QCスキップ" };
+  const empty = { after: [], before: [] };
+  if (!PHOTO_QC || !images.length) return { kept: images, dropped: [], note: "QCスキップ", ...empty };
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { kept: images, dropped: [], note: "ANTHROPIC_API_KEY未設定→QCスキップ" };
+  if (!apiKey) return { kept: images, dropped: [], note: "ANTHROPIC_API_KEY未設定→QCスキップ", ...empty };
 
   const titleStr = (typeof post?.title === "string" ? post.title : post?.title?.rendered || "").slice(0, 80);
   const content = [
     {
       type: "text",
       text: [
-        "あなたはリフォーム会社の公式Instagram（施工事例カルーセル）の品質チェック担当です。",
+        "あなたはリフォーム会社の公式Instagram（施工事例カルーセル）の品質チェック＆並び替え担当です。",
         `記事「${titleStr}」の投稿候補写真を 1枚目から ${images.length} 枚見せます。各写真の直前に【写真N】と番号を付けています。`,
-        "やることは『明らかにダメな写真を取り除く』だけです。キュレーション（ベストを選ぶ）ではありません。",
-        "■ 原則：基本は全部 keep。少しでも施工箇所（外壁・屋根・水廻り・内装・外構・玄関・サッシ等）や完成の様子が普通に見て取れるなら採用。迷ったら必ず keep。",
-        "■ drop（落とす）に入れるのは次のような明白なNGだけ：ブレている／ピンボケ／極端に暗い・白飛びで内容が見えない／何を撮ったのか本当に判別できない／施工と無関係（人物のスナップ・車・看板・室内で人が主役、書類や図面のスクショ、PC/スマホ画面のキャプチャ等）／画質が極端に粗く投稿に耐えない。",
-        "■ 次の程度の理由では drop しない：『他にもっと良い写真がある』『似た構図がある』『ディテールに寄りすぎ』『画角がやや狭い』『生活感が少し写る』『プロのライターが撮ったものではなさそう』など。素人写真でも内容が分かれば keep。",
-        "■ 1枚目はアイキャッチ（記事のメイン完成カット）。よほど崩れていない限り keep。",
-        '出力は JSON のみ・前置きや解説は一切なし。形式: {"keep":[採用する写真番号を昇順],"drop":[落とす写真番号],"note":"dropした理由を一言・無ければ空文字（40字以内）"}',
+        "やることは2つだけ：",
+        "【1】明らかにダメな写真を取り除く（キュレーションではない）",
+        "  ■ 原則：基本は全部 keep。少しでも施工箇所（外壁・屋根・水廻り・内装・外構・玄関・サッシ等）や完成の様子が普通に見て取れるなら採用。迷ったら必ず keep。",
+        "  ■ drop（落とす）に入れるのは次のような明白なNGだけ：ブレている／ピンボケ／極端に暗い・白飛びで内容が見えない／何を撮ったのか本当に判別できない／施工と無関係（人物のスナップ・車・看板・室内で人が主役、書類や図面のスクショ、PC/スマホ画面のキャプチャ等）／画質が極端に粗く投稿に耐えない／赤マーキング線や注釈の入った調査写真。",
+        "  ■ 次の程度の理由では drop しない：『他にもっと良い写真がある』『似た構図がある』『ディテールに寄りすぎ』『画角がやや狭い』『生活感が少し写る』『プロのライターが撮ったものではなさそう』など。素人写真でも内容が分かれば keep。",
+        "【2】Before/After を判定して並び順に使う",
+        "  ■ after = 施工後・完成写真と明らかに判定できるもの（綺麗・新しい・整っている・新材で仕上がっている等）",
+        "  ■ before = 施工前と明らかに判定できるもの（劣化・汚れ・古い設備・解体前・破損・調査中の様子等）",
+        "  ■ どちらか判定できない・施工中／部材アップ／部分ディテールは どちらにも入れない（unknownとして扱う）",
+        "  ■ after の配列は『1枚目にしたい順』に並べる（明るく・全体が映えて・お客様が「こうなりたい」と思える代表カットを先頭に）",
+        '出力は JSON のみ・前置きや解説は一切なし。形式: {"keep":[採用番号を昇順],"drop":[落とす番号],"note":"dropした理由を一言・40字以内・無ければ空文字","after":[施工後と判定した番号・hero映え順],"before":[施工前と判定した番号]}',
       ].join("\n"),
     },
     ...images.map((url, i) => ([
@@ -276,23 +286,88 @@ export async function curateImages(images, post) {
     const r = await fetch(ANTHROPIC_API, {
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: PHOTO_QC_MODEL, max_tokens: 300, messages: [{ role: "user", content }] }),
+      body: JSON.stringify({ model: PHOTO_QC_MODEL, max_tokens: 400, messages: [{ role: "user", content }] }),
     });
     const text = await r.text();
-    if (!r.ok) return { kept: images, dropped: [], note: `QC失敗(HTTP ${r.status})→全採用` };
+    if (!r.ok) return { kept: images, dropped: [], note: `QC失敗(HTTP ${r.status})→全採用`, ...empty };
     const j = JSON.parse(text);
     const out = (j.content || []).filter((c) => c.type === "text").map((c) => c.text).join("").trim();
     const m = out.match(/\{[\s\S]*\}/);
     parsed = m ? JSON.parse(m[0]) : null;
   } catch (e) {
-    return { kept: images, dropped: [], note: `QC例外(${e.message})→全採用` };
+    return { kept: images, dropped: [], note: `QC例外(${e.message})→全採用`, ...empty };
   }
-  if (!parsed || !Array.isArray(parsed.keep)) return { kept: images, dropped: [], note: "QC応答不正→全採用" };
+  if (!parsed || !Array.isArray(parsed.keep)) return { kept: images, dropped: [], note: "QC応答不正→全採用", ...empty };
 
-  const keepIdx = new Set(parsed.keep.map((n) => Number(n) - 1).filter((i) => Number.isInteger(i) && i >= 0 && i < images.length));
+  const toIdx = (arr) => (Array.isArray(arr) ? arr : [])
+    .map((n) => Number(n) - 1)
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < images.length);
+  const keepIdx = new Set(toIdx(parsed.keep));
   const kept = images.filter((_, i) => keepIdx.has(i));
   const dropped = images.filter((_, i) => !keepIdx.has(i));
-  return { kept, dropped, note: (parsed.note || "").toString().slice(0, 60) };
+  // after / before は keep に絞り、順番（後→前）を保つ。重複排除。
+  const seenA = new Set(), seenB = new Set();
+  const after = toIdx(parsed.after)
+    .filter((i) => keepIdx.has(i) && !seenA.has(i) && (seenA.add(i), true))
+    .map((i) => images[i]);
+  const before = toIdx(parsed.before)
+    .filter((i) => keepIdx.has(i) && !seenB.has(i) && (seenB.add(i), true))
+    .map((i) => images[i]);
+  return { kept, dropped, note: (parsed.note || "").toString().slice(0, 60), after, before };
+}
+
+// Before枚数の上限（環境変数で調整可、既定=2）。
+// After写真が少なくとも1枚ある記事では、超過分のBeforeは投稿から外す。
+// 「新しくなった綺麗な写真を多めに見せたい」という上月さん方針（2026-05-25）。
+// 0 にすると無制限（全Beforeを末尾に並べるだけ）。
+const MAX_BEFORE_TAIL = Number.isFinite(Number(process.env.MAX_BEFORE_TAIL))
+  ? Number(process.env.MAX_BEFORE_TAIL)
+  : 2;
+
+/**
+ * QC後の kept 配列を「After先頭・Before最後」に並び替える。
+ * - vision 分類（curateImages の after/before）を最優先で使い、
+ *   分類情報がない場合（QCスキップ・API失敗）はファイル名ラベルにフォールバック
+ * - After写真が1枚以上ある場合、Before超過分（MAX_BEFORE_TAIL超）は配列から外す
+ * - 並び順：[After（hero映え順）, middle/unknown, Before最後最大MAX_BEFORE_TAIL枚]
+ * @param {string[]} kept - QC通過済みの画像URL配列（元の順序）
+ * @param {{after: string[], before: string[]}} qc - vision分類結果
+ * @returns {string[]} 並び替え＆Before上限適用後の配列
+ */
+export function reorderByClassification(kept, qc) {
+  if (!Array.isArray(kept) || kept.length <= 1) return kept;
+  const isAfterName = (u) => /[\/\-_.]after[\/\-_.]/i.test(u);
+  const isBeforeName = (u) => /[\/\-_.]before[\/\-_.]/i.test(u);
+  const afterSet = new Set(qc?.after || []);
+  const beforeSet = new Set(qc?.before || []);
+  const hasVision = afterSet.size > 0 || beforeSet.size > 0;
+
+  // 優先順：ファイル名ラベル（人が意図的に付けた）> vision分類 > 中間
+  // 新しい記事は okugawa-after-... 形式でラベル付きアップロードされてる前提
+  const kindOf = (u) => {
+    if (isAfterName(u)) return "after";
+    if (isBeforeName(u)) return "before";
+    if (afterSet.has(u)) return "after";
+    if (beforeSet.has(u)) return "before";
+    return "middle";
+  };
+
+  // After は vision の hero映え順を尊重（vision指定 かつ ファイル名と矛盾しないもの優先、続けてその他のAfter）
+  const visionAfterFirst = hasVision
+    ? (qc.after || []).filter((u) => kept.includes(u) && kindOf(u) === "after")
+    : [];
+  const restAfter = kept.filter((u) => kindOf(u) === "after" && !visionAfterFirst.includes(u));
+  const afterOrdered = [...visionAfterFirst, ...restAfter];
+  const middles = kept.filter((u) => kindOf(u) === "middle");
+  const befores = kept.filter((u) => kindOf(u) === "before");
+
+  // After が 1枚以上あれば Before は MAX_BEFORE_TAIL 枚に絞る（超過分は投稿から外す）
+  // After が 0 だと carousel が成立しなくなる可能性があるので絞らない
+  const beforeTail = (afterOrdered.length >= 1 && MAX_BEFORE_TAIL > 0)
+    ? befores.slice(0, MAX_BEFORE_TAIL)
+    : befores;
+
+  return [...afterOrdered, ...middles, ...beforeTail];
 }
 
 export async function buildPostPayload(post) {
@@ -304,7 +379,8 @@ export async function buildPostPayload(post) {
     ?? extractBodyImages(post.content?.rendered || "");
   const candidates = reorderImages(featuredUrl, bodyImages, MAX_IMAGES);
   const qc = await curateImages(candidates, post);
-  const images = qc.kept;
+  // After先頭・Before最後1〜2枚に並び替え（vision分類優先・なければファイル名フォールバック）
+  const images = reorderByClassification(qc.kept, qc);
   const caption = buildCaption(post);
   return { images, caption, candidates, qc };
 }
@@ -507,8 +583,19 @@ async function mainCli() {
     console.log(`🧹 QC除外 ${qc.dropped.length}枚${qc.note ? " (" + qc.note + ")" : ""}:`);
     qc.dropped.forEach((u) => console.log(`   ✗ ${u}`));
   }
-  console.log(`🖼️  Images (${images.length}/${MAX_IMAGES}):`);
-  images.forEach((u, i) => console.log(`   ${i + 1}. ${u}`));
+  if (qc?.after?.length || qc?.before?.length) {
+    console.log(`🔀 Vision分類: after=${qc.after?.length || 0}枚 / before=${qc.before?.length || 0}枚`);
+  }
+  console.log(`🖼️  Images (${images.length}/${MAX_IMAGES}) — After先頭・Before最後の順:`);
+  const tagOf = (u) => {
+    // reorderByClassification と同じ優先順：ファイル名 > vision > middle
+    if (/[\/\-_.]after[\/\-_.]/i.test(u)) return "[After:name]";
+    if (/[\/\-_.]before[\/\-_.]/i.test(u)) return "[Before:name]";
+    if (qc?.after?.includes(u)) return "[After:vision]";
+    if (qc?.before?.includes(u)) return "[Before:vision]";
+    return "[middle]";
+  };
+  images.forEach((u, i) => console.log(`   ${i + 1}. ${tagOf(u)} ${u}`));
   if (!images.length) {
     console.log("⚠️  採用画像0枚。投稿しません。");
     return;

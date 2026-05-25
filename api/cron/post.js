@@ -59,6 +59,8 @@ export default async function handler(req, res) {
         images,
         droppedImages: qc?.dropped || [],
         qcNote: qc?.note || "",
+        visionAfter: qc?.after || [],
+        visionBefore: qc?.before || [],
         skippedPosts: pick.skipped,
         captionLength: caption.length,
         captionPreview: caption.slice(0, 200),
