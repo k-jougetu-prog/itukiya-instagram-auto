@@ -1,7 +1,34 @@
 {
-  "updated_at": "2026-06-06T09:48:58.592905+00:00",
-  "count": 126,
+  "updated_at": "2026-06-07T22:15:34.120830+00:00",
+  "count": 127,
   "posts": [
+    {
+      "id": 54560,
+      "date": "2026-06-07T15:13:52",
+      "title": "鳥のフン・雨の悩みを解決！カーポート新設＋土間コンクリート工事 ── K様邸／松阪市",
+      "link": "https://itukiya.jp/works/post-54560/",
+      "categories": [
+        7
+      ],
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-main-eyecatch-1.jpg",
+      "body_images": [
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/before-doma-zenkei.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/before-saisun.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/during-dokoji.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/during-carport-tatekata.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/during-haikin.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/during-uchisetsu.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/during-yojo.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-main-eyecatch-1.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-zenkei1-1.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-zenkei2-1.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-syamen.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-doma-detail.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-yoko.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-jari.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/06/after-niwa.jpg"
+      ]
+    },
     {
       "id": 54431,
       "date": "2026-05-10T13:11:32",
@@ -12,7 +39,7 @@
         914,
         7
       ],
-      "featured_url": null,
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/after-genkan-main-1.jpg",
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/before-genkan-tile-1.jpg",
         "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/before-genkan-overall.jpg",
@@ -45,7 +72,7 @@
         681,
         7
       ],
-      "featured_url": null,
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/IMG_2512.jpg",
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/IMG_5732_masked.jpg",
         "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/IMG_5733.jpg",
