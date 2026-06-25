@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-06-24T09:03:55.804400+00:00",
+  "updated_at": "2026-06-24T23:15:30.650957+00:00",
   "count": 25,
   "posts": [
     {
@@ -154,7 +154,7 @@
       "categories": [
         663
       ],
-      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2025/08/13.jpg",
+      "featured_url": null,
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2025/08/13-900x636.jpg"
       ]
@@ -167,7 +167,7 @@
       "categories": [
         663
       ],
-      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2025/05/0158f58e652d49a6298d32e46c14db11.jpg",
+      "featured_url": null,
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2025/05/0158f58e652d49a6298d32e46c14db11.jpg"
       ]
@@ -180,7 +180,7 @@
       "categories": [
         663
       ],
-      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2024/12/5b1bc0959f193a91e0e526a8e01df707.jpg",
+      "featured_url": null,
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2024/12/5b1bc0959f193a91e0e526a8e01df707.jpg"
       ]
@@ -193,7 +193,7 @@
       "categories": [
         663
       ],
-      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2024/08/ad3c21c41b6baea92381e1188f6ceb17.jpg",
+      "featured_url": null,
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2024/08/ad3c21c41b6baea92381e1188f6ceb17.jpg"
       ]
@@ -206,7 +206,7 @@
       "categories": [
         663
       ],
-      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2024/04/0158f58e652d49a6298d32e46c14db11.jpg",
+      "featured_url": null,
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2024/04/0158f58e652d49a6298d32e46c14db11.jpg"
       ]
@@ -219,7 +219,7 @@
       "categories": [
         663
       ],
-      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2023/12/5b1bc0959f193a91e0e526a8e01df707.jpg",
+      "featured_url": null,
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2023/12/5b1bc0959f193a91e0e526a8e01df707.jpg"
       ]
@@ -331,7 +331,7 @@
       "categories": [
         663
       ],
-      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2010/06/newspaper-thumb-460x338-6.jpg",
+      "featured_url": null,
       "body_images": []
     }
   ]
