@@ -1,7 +1,23 @@
 {
-  "updated_at": "2026-07-11T20:55:06.767877+00:00",
-  "count": 25,
+  "updated_at": "2026-07-12T10:27:47.116971+00:00",
+  "count": 26,
   "posts": [
+    {
+      "id": 54705,
+      "date": "2026-07-12T09:14:29",
+      "title": "【最大69%OFF】リフォーム夏割セール開催中！＜見積・相談無料＞",
+      "link": "https://itukiya.jp/news/post-54705/",
+      "categories": [
+        663
+      ],
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2026/07/LCR-scaled.jpg",
+      "body_images": [
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/07/LCR-scaled.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/07/LCRura-scaled.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2025/10/8089e50294910c6cb163e5cb54ad137b-900x263.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2025/10/552eb4aed1593e952e7a12c7b8a0e9e1-900x513.jpg"
+      ]
+    },
     {
       "id": 54524,
       "date": "2026-05-31T09:25:27",
@@ -26,7 +42,7 @@
       "categories": [
         663
       ],
-      "featured_url": null,
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/LCR141omote.jpg",
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/LCR141omote.jpg",
         "https://itukiya.jp/wordpress/wp-content/uploads/2026/05/LCR141_ura.jpg",
@@ -90,7 +106,7 @@
       "categories": [
         663
       ],
-      "featured_url": null,
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2025/12/Jack2026_omote-scaled.jpg",
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2025/12/Jack2026_omote-scaled.jpg",
         "https://itukiya.jp/wordpress/wp-content/uploads/2025/12/Jack2026_ura-scaled.jpg",
@@ -219,7 +235,7 @@
       "categories": [
         663
       ],
-      "featured_url": null,
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2023/12/5b1bc0959f193a91e0e526a8e01df707.jpg",
       "body_images": [
         "https://itukiya.jp/wordpress/wp-content/uploads/2023/12/5b1bc0959f193a91e0e526a8e01df707.jpg"
       ]
