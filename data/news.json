@@ -1,7 +1,23 @@
 {
-  "updated_at": "2026-07-31T09:05:38.451280+00:00",
-  "count": 26,
+  "updated_at": "2026-08-01T09:01:27.284388+00:00",
+  "count": 27,
   "posts": [
+    {
+      "id": 54765,
+      "date": "2026-08-01T10:00:42",
+      "title": "【最大69%OFF】工事費コミコミ＆特別価格の「リフォーム応援SALE！」開催中！＜見積・相談無料＞",
+      "link": "https://itukiya.jp/news/post-54765/",
+      "categories": [
+        663
+      ],
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2026/07/a8cbd3b6474798e69fed504c9acebf4f.jpg",
+      "body_images": [
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/07/a8cbd3b6474798e69fed504c9acebf4f.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/07/35e77e9204bd23f9481d1263b199a470.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2025/10/8089e50294910c6cb163e5cb54ad137b-900x263.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2025/10/552eb4aed1593e952e7a12c7b8a0e9e1-900x513.jpg"
+      ]
+    },
     {
       "id": 54705,
       "date": "2026-07-12T09:14:29",
