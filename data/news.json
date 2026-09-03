@@ -1,7 +1,23 @@
 {
-  "updated_at": "2026-09-02T09:01:13.791605+00:00",
-  "count": 27,
+  "updated_at": "2026-09-03T00:55:58.814692+00:00",
+  "count": 28,
   "posts": [
+    {
+      "id": 54929,
+      "date": "2026-09-01T10:00:04",
+      "title": "【最大69%OFF】国の補助金も活用！グループ総力「リフォーム祭」開催中！＜見積・相談無料＞",
+      "link": "https://itukiya.jp/news/post-54929/",
+      "categories": [
+        663
+      ],
+      "featured_url": "https://itukiya.jp/wordpress/wp-content/uploads/2026/08/d36ed6f9479fa2dcd7121c33d56950f1-scaled.jpg",
+      "body_images": [
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/08/d36ed6f9479fa2dcd7121c33d56950f1-scaled.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2026/08/98d7937bc67895402aa6fcec81d90334-scaled.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2025/10/8089e50294910c6cb163e5cb54ad137b-900x263.jpg",
+        "https://itukiya.jp/wordpress/wp-content/uploads/2025/10/552eb4aed1593e952e7a12c7b8a0e9e1-900x513.jpg"
+      ]
+    },
     {
       "id": 54765,
       "date": "2026-08-01T10:00:42",
