@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 
 const ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const ENV_PATH = path.join(ROOT, ".env.local");
@@ -27,7 +28,11 @@ loadEnv();
 const WP_BASE = "https://itukiya.jp/wp-json/wp/v2";
 const SEKOU_CATEGORY = 7;
 const GRAPH = "https://graph.instagram.com/v21.0";
-const MAX_IMAGES = 5; // インスタは最大10だがHP誘導を優先して5枚に制限
+const MAX_IMAGES = 7; // 最終投稿の最大枚数。完成後（After）を主役にたっぷり見せる（2026-07-19に5→7）
+// vision QC/分類に見せる候補の上限。ここで先に絞りすぎるとAfterを取りこぼして
+// 「After1枚・Before2枚」の残念投稿になる（複合工事で頻発）。広めに取ってから
+// 分類→After優先で並べ替え→最後にMAX_IMAGESへ絞る、の順にするのが肝。
+const CANDIDATE_MAX = 10;
 const NEW_DAYS = 14; // 「新着」判定の日数（公開からの日数）
 // ストック消化の対象開始日。新着がない時はこの日以降の未投稿事例を古い順に投げる。
 // 2023年初頭の物件にもまだ魅力的なものが多いので固定日にしている（ローリング3年窓だと
@@ -53,6 +58,8 @@ const CACHE_URL = "https://raw.githubusercontent.com/k-jougetu-prog/itukiya-inst
 // IMG_PROXY_BASE を設定すると、IGに渡す画像URLを /api/img プロキシ経由に書き換える。
 // 例: IMG_PROXY_BASE="https://itukiya-instagram-auto.vercel.app/api/img"
 const IMG_PROXY_BASE = process.env.IMG_PROXY_BASE || "";
+// 告知ストーリー画像を生成する /api/story-card のホスト（Metaがfetchするので公開URL）
+const STORY_CARD_BASE = process.env.STORY_CARD_BASE || "https://itukiya-instagram-auto.vercel.app";
 function maybeProxyUrl(u) {
   if (!IMG_PROXY_BASE || !u) return u;
   try {
@@ -163,7 +170,104 @@ export async function getPostedIds(igUserId, igToken) {
   return ids;
 }
 
-function buildCaption(post) {
+// 工種別ハッシュタグ：タイトル＋本文から工事内容を判定して、その工事を探してる人に当たるタグを足す。
+// 固定タグ（buildCaptionの末尾）に既に入ってるもの（#リフォーム #リノベーション 等）は重複させない。
+function buildWorkHashtags(post) {
+  const titleRaw = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
+  const bodyRaw = (post.content_text || post.excerpt || (typeof post.content === "string" ? post.content : post.content?.rendered) || "");
+  const hay = `${titleRaw} ${bodyRaw}`;
+  // [キーワード正規表現, [そのとき足すタグ...]]。上から順に判定し、ヒットしたタグを集める。
+  const RULES = [
+    [/外壁|塗装/, ["#外壁塗装", "#三重県外壁塗装", "#松阪市外壁塗装", "#外壁リフォーム"]],
+    [/屋根|瓦|スレート|カバー工法/, ["#屋根リフォーム", "#屋根工事", "#屋根塗装"]],
+    [/キッチン|台所/, ["#キッチンリフォーム", "#システムキッチン"]],
+    [/浴室|風呂|バス|ユニットバス|楽湯/, ["#浴室リフォーム", "#お風呂リフォーム", "#ユニットバス"]],
+    [/トイレ/, ["#トイレリフォーム"]],
+    [/洗面/, ["#洗面リフォーム", "#洗面台"]],
+    [/水廻り|水回り/, ["#水回りリフォーム", "#水廻りリフォーム"]],
+    [/外構|エクステリア|カーポート|駐車場|ウッドデッキ|フェンス|玄関アプローチ/, ["#外構工事", "#エクステリア", "#外構リフォーム"]],
+    [/内装|クロス|壁紙|フローリング|床/, ["#内装リフォーム", "#クロス張替え"]],
+    [/玄関(?!アプローチ)/, ["#玄関リフォーム"]],
+    [/サッシ|窓|内窓|二重窓/, ["#窓リフォーム", "#内窓"]],
+    [/全面|フルリフォーム|フルリノベ|まるごと|まるっと/, ["#フルリフォーム"]],
+    [/和室|畳|襖|障子/, ["#和室リフォーム"]],
+    [/断熱|窓断熱|先進的窓リノベ/, ["#断熱リフォーム", "#補助金"]],
+  ];
+  const tags = [];
+  for (const [re, ts] of RULES) {
+    if (re.test(hay)) for (const t of ts) if (!tags.includes(t)) tags.push(t);
+  }
+  // 固定タグと重複するもの・付けすぎを除く。工種タグは最大8個に制限（合計30個以内に収める）
+  const FIXED = new Set(["#リフォーム", "#リノベーション", "#施工事例"]);
+  return tags.filter((t) => !FIXED.has(t)).slice(0, 8);
+}
+
+// 半々BA表紙(案A)の見出し(日本語・明朝)と英字サブを記事から作る。
+// ★見出しは「工種マップ由来の短い定型」を第一候補にする。記事タイトルの生文を機械的に
+//   切ると(1)単語途中でブツ切れ(2)「…／○様邸」から施主のお名前が表紙に漏れる(コンプラ事故)
+//   になるため、タイトル生文はフォールバック時のみ・区切り(｜|／/)で様邸節を除去してから使う。
+const COVER_WORK_MAP = [
+  [/外壁|塗装/, "外壁塗装", "EXTERIOR WALL PAINTING"],
+  [/屋根|瓦|スレート|カバー工法/, "屋根リフォーム", "ROOF RENOVATION"],
+  [/キッチン|台所/, "キッチンリフォーム", "KITCHEN RENOVATION"],
+  [/浴室|風呂|バス|ユニットバス|楽湯/, "浴室リフォーム", "BATHROOM RENOVATION"],
+  [/トイレ/, "トイレリフォーム", "TOILET RENOVATION"],
+  [/洗面/, "洗面リフォーム", "WASHROOM RENOVATION"],
+  [/水廻り|水まわり|水回り/, "水廻りリフォーム", "WATER AREA RENOVATION"],
+  [/外構|エクステリア|カーポート|駐車場|ウッドデッキ|フェンス/, "外構リフォーム", "EXTERIOR RENOVATION"],
+  [/内装|クロス|壁紙|フローリング|床|LDK|リビング|ダイニング/, "内装リフォーム", "INTERIOR RENOVATION"],
+  [/玄関/, "玄関リフォーム", "ENTRANCE RENOVATION"],
+  [/サッシ|窓|内窓|二重窓/, "窓リフォーム", "WINDOW RENOVATION"],
+  [/全面|フルリフォーム|フルリノベ|まるごと/, "フルリフォーム", "FULL RENOVATION"],
+  [/和室|畳|襖|障子/, "和室リフォーム", "JAPANESE ROOM RENOVATION"],
+];
+
+// タイトル生文から安全な見出しを作る（工種マップが外れた時のフォールバック専用）。
+// 区切り(｜|／/・全角スペース・読点)で先頭の「地名＋○様邸」節を落とし、様邸が残る/
+// 完全な句で切れない場合は汎用「リフォーム施工事例」に逃がす（ブツ切り・名前露出を構造的に排除）。
+function safeHeadline(t) {
+  let head = (t.split(/[｜|／/、　\s]/).filter(Boolean)[0] || "").trim();
+  head = head.replace(/\s*\S{1,10}(様邸|邸|様)\s*$/u, "").trim(); // 末尾の様邸節を除去
+  if (!head || /様|邸/.test(head)) return "リフォーム施工事例";   // 先頭/中間に名前が残るなら汎用へ
+  // 助詞/連用止め(を/に/で/し/た…)で終わる＝完全な句でないので汎用へ逃がす（「浴槽で」「一新し」等のブツ切り排除）
+  if (/(を|に|へ|で|と|や|の|し|た|て|から|まで|が|は|も)$/.test(head)) return "リフォーム施工事例";
+  if (head.length <= 14) return head;
+  // 14字超は『完全な句』で切る（単語途中では切らない）：工種語 or ・／、。の直後。
+  const cut = head.slice(0, 16);
+  const m = cut.match(/^.*(?:リフォーム|リノベーション|工事|塗装|改修|新築)/) || cut.match(/^.*[・、。／]/);
+  if (m) return m[0].replace(/[・、。／]$/, "");
+  return "リフォーム施工事例"; // 工種語も区切りも無ければブツ切りせず汎用に逃がす
+}
+
+export function coverMeta(post) {
+  const titleRaw = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
+  const t = titleRaw
+    .replace(/&#8211;/g, "–").replace(/&#8217;/g, "'").replace(/&#8220;/g, "").replace(/&#8221;/g, "")
+    .replace(/[“”]/g, "").replace(/"/g, "").replace(/&amp;/g, "&");
+  const bodyRaw = (post.content_text || post.excerpt || (typeof post.content === "string" ? post.content : post.content?.rendered) || "");
+  const hay = `${titleRaw} ${bodyRaw}`;
+  const hits = COVER_WORK_MAP.filter(([re]) => re.test(hay));
+
+  let title, enSub;
+  if (hits.length === 1) {
+    title = hits[0][1];
+    enSub = hits[0][2];
+  } else if (hits.length >= 2) {
+    // 複合工事：代表2工種を「・」で連結（例：浴室・洗面リフォーム）
+    const names = hits.slice(0, 2).map((h) => h[1].replace(/リフォーム$/, ""));
+    title = `${names.join("・")}リフォーム`;
+    enSub = "RENOVATION & REFORM";
+  } else {
+    title = safeHeadline(t);         // 工種不明時のみタイトル生文から安全抽出
+    enSub = "RENOVATION & REFORM";
+  }
+  // ★最終防波堤：titleに「様」「邸」が1文字でも残っていたら問答無用で汎用見出しに落とす。
+  //   表紙にもキャプション先頭フック行にも施主のお名前を絶対に出さないための機械保証。
+  if (/様|邸/.test(title)) title = "リフォーム施工事例";
+  return { title, enSub };
+}
+
+export function buildCaption(post) {
   // titleはJSONキャッシュ時点で post.title.rendered or post.title (string)
   const titleRaw = typeof post.title === "string" ? post.title : (post.title?.rendered || "");
   const title = titleRaw
@@ -174,11 +278,14 @@ function buildCaption(post) {
     .replace(/[“”]/g, "")
     .replace(/"/g, "")
     .replace(/&amp;/g, "&");
+  const { title: workTitle } = coverMeta(post);
   return [
+    `ビフォーアフターの変化に注目👀 ${workTitle}の施工事例です。`,
+    "",
     title,
     "",
-    "詳しい施工内容と費用感はプロフィールのリンクからどうぞ🔗",
-    "気になるところがあれば、お気軽にコメントやDMでもOKです💬",
+    "詳しい費用・工期はプロフィールのHPから🔗",
+    "気になるところは、お気軽にコメントやDMでもOKです💬",
     "",
     "──────────",
     "松阪市の地域密着リフォーム屋「いつき家」🌿",
@@ -188,7 +295,13 @@ function buildCaption(post) {
     "☎ 0120-939-878（営業電話は一切しません🙅‍♂️）",
     "🕐 10〜18時／🚫水曜定休",
     "",
-    `#松阪リフォーム #松阪市リフォーム #いつき家 #三重県松阪市 #リフォーム #リフォーム会社 #リノベーション #施工事例 #松阪市 #三重県 #創業29年 #地域密着 #笑顔リフォーム #10年保証 #post${post.id}`,
+    [
+      ...buildWorkHashtags(post),                  // ← 工種別（投稿ごとに変わる）
+      "#松阪リフォーム", "#松阪市リフォーム", "#いつき家", "#三重県松阪市",
+      "#リフォーム", "#リフォーム会社", "#リノベーション", "#施工事例",
+      "#松阪市", "#三重県", "#創業29年", "#地域密着", "#笑顔リフォーム", "#10年保証",
+      `#post${post.id}`,
+    ].join(" "),
   ].join("\n");
 }
 
@@ -207,9 +320,11 @@ function imageDedupKey(url) {
 }
 
 /**
- * 画像をafter優先で並び替える。サイズ違いの重複は除去する。
+ * vision QC/分類に見せる「候補」を作る。ここでは最終枚数まで絞らない（広めに残す）。
+ * サイズ違いの重複は除去。After を取りこぼさないよう after を優先で候補に入れる。
+ * 実際のAfter先頭・Before末尾の並び替え＆最終枚数への絞り込みは
+ * reorderByClassification + buildPostPayload 側で分類結果を使って行う。
  * - 1枚目: featured（アイキャッチ＝メイン完成カット）
- * - 2枚目以降: after優先で並べつつ、before も対比として混ぜる
  */
 function reorderImages(featuredUrl, bodyImages, max) {
   const seenKeys = new Set();
@@ -231,9 +346,10 @@ function reorderImages(featuredUrl, bodyImages, max) {
   const others = remaining.filter((u) => !isAfter(u) && !isBefore(u));
 
   const queue = (afters.length > 0 || befores.length > 0)
-    // ファイル名に before/after が含まれる事例 → After2枚 → Before2枚 → 残りafter → その他 → 残りbefore
-    ? [...afters.slice(0, 2), ...befores.slice(0, 2), ...afters.slice(2), ...others, ...befores.slice(2)]
-    // before/after判定なしの事例 → 本文順（従来動作）
+    // ファイル名に before/after ラベルがある事例 → After優先で候補に入れ、Before は後ろ
+    // （候補段階では絞らない。最終並び替え＆枚数調整は reorderByClassification が担当）
+    ? [...afters, ...others, ...befores]
+    // before/after判定なしの事例 → 本文順（vision分類に全部見せる）
     : bodyImages;
   for (const u of queue) tryPush(u);
   return result.slice(0, max);
@@ -250,12 +366,30 @@ function reorderImages(featuredUrl, bodyImages, max) {
  * @returns {Promise<{kept: string[], dropped: string[], note: string, after: string[], before: string[]}>}
  */
 export async function curateImages(images, post) {
-  const empty = { after: [], before: [] };
+  const empty = { after: [], before: [], coverAfter: null, coverBefore: null };
   if (!PHOTO_QC || !images.length) return { kept: images, dropped: [], note: "QCスキップ", ...empty };
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { kept: images, dropped: [], note: "ANTHROPIC_API_KEY未設定→QCスキップ", ...empty };
 
   const titleStr = (typeof post?.title === "string" ? post.title : post?.title?.rendered || "").slice(0, 80);
+  // ★many-image(20枚超)リクエストは各辺2000px以下必須、かつURLソースは原寸(1920〜2560px)で
+  // 渡るため400 "image dimensions exceed max allowed size for many-image requests"で弾かれる。
+  // これを怠るとvision QCが毎回400→全採用フォールバック＝記事の写真順そのまま＝施工前が先頭に
+  // 残る「施工前ばっか」事故になる（2026-10-02 50990で発覚・恒久修正）。
+  // 対策：sharpで長辺1568px(Anthropic推奨)に縮小してbase64で渡す。
+  let sources;
+  try {
+    sources = await Promise.all(images.map(async (url) => {
+      const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+      if (!r.ok) throw new Error(`img ${r.status}`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      const jpg = await sharp(buf).rotate().resize(1568, 1568, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+      return { type: "base64", media_type: "image/jpeg", data: jpg.toString("base64") };
+    }));
+  } catch (e) {
+    return { kept: images, dropped: [], note: `QC画像取得失敗(${e.message})→全採用`, ...empty };
+  }
+
   const content = [
     {
       type: "text",
@@ -272,12 +406,16 @@ export async function curateImages(images, post) {
         "  ■ before = 施工前と明らかに判定できるもの（劣化・汚れ・古い設備・解体前・破損・調査中の様子等）",
         "  ■ どちらか判定できない・施工中／部材アップ／部分ディテールは どちらにも入れない（unknownとして扱う）",
         "  ■ after の配列は『1枚目にしたい順』に並べる（明るく・全体が映えて・お客様が「こうなりたい」と思える代表カットを先頭に）",
-        '出力は JSON のみ・前置きや解説は一切なし。形式: {"keep":[採用番号を昇順],"drop":[落とす番号],"note":"dropした理由を一言・40字以内・無ければ空文字","after":[施工後と判定した番号・hero映え順],"before":[施工前と判定した番号]}',
+        "【3】表紙(ビフォーアフター比較カード)用に、同一箇所で『変化が最も伝わる』Before/Afterの対を1組だけ選ぶ",
+        "  ■ coverAfter=その施工後の番号(afterに含まれる1枚)、coverBefore=同じ箇所の施工前の番号(beforeに含まれる1枚)",
+        "  ■ 必ず『同じ場所』の対にする（例：浴室のBeforeと浴室のAfter／外壁のBeforeと外壁のAfter）。別々の箇所どうしを組まない。良い対が無ければ両方 null",
+        "  ■ 表紙はプロフィール一覧に並ぶ『顔』。鏡や窓に人物が写り込む／生活用品が雑多に散らかる写真は絶対に選ばない。最もクリーンで変化が美しく伝わる対を選ぶ",
+        '出力は JSON のみ・前置きや解説は一切なし。形式: {"keep":[採用番号を昇順],"drop":[落とす番号],"note":"dropした理由を一言・40字以内・無ければ空文字","after":[施工後と判定した番号・hero映え順],"before":[施工前と判定した番号],"coverAfter":施工後番号 or null,"coverBefore":施工前番号 or null}',
       ].join("\n"),
     },
-    ...images.map((url, i) => ([
+    ...images.map((_, i) => ([
       { type: "text", text: `【写真${i + 1}】` },
-      { type: "image", source: { type: "url", url } },
+      { type: "image", source: sources[i] },
     ])).flat(),
   ];
 
@@ -313,16 +451,29 @@ export async function curateImages(images, post) {
   const before = toIdx(parsed.before)
     .filter((i) => keepIdx.has(i) && !seenB.has(i) && (seenB.add(i), true))
     .map((i) => images[i]);
-  return { kept, dropped, note: (parsed.note || "").toString().slice(0, 60), after, before };
+  // 表紙用のBefore/After対。vision指定が整合しなければ after[0]/before[0] にフォールバック。
+  const pickUrl = (n) => {
+    const i = Number(n) - 1;
+    return Number.isInteger(i) && i >= 0 && i < images.length ? images[i] : null;
+  };
+  let coverAfter = pickUrl(parsed.coverAfter);
+  let coverBefore = pickUrl(parsed.coverBefore);
+  // visionが「同一箇所の有効なBA対」を返した時だけ表紙を作る。整合しなければ表紙なし(null)。
+  // 別箇所を強制合成した"間違い表紙"を出すより、表紙なし(通常Afterヒーローが1枚目)の方が信頼される。
+  if (!coverAfter || !after.includes(coverAfter)) coverAfter = null;
+  if (!coverBefore || !before.includes(coverBefore)) coverBefore = null;
+  if (!coverAfter || !coverBefore) { coverAfter = null; coverBefore = null; }
+  return { kept, dropped, note: (parsed.note || "").toString().slice(0, 60), after, before, coverAfter, coverBefore };
 }
 
-// Before枚数の上限（環境変数で調整可、既定=2）。
+// Before枚数の上限（環境変数で調整可、既定=1）。
 // After写真が少なくとも1枚ある記事では、超過分のBeforeは投稿から外す。
-// 「新しくなった綺麗な写真を多めに見せたい」という上月さん方針（2026-05-25）。
-// 0 にすると無制限（全Beforeを末尾に並べるだけ）。
+// 「新しくなった綺麗な写真を主役に。複合工事だとBeforeが増えるほど別々の箇所の
+// 施工前写真が混ざって文脈が崩れる（訳のわからんBefore問題）」ため 2→1 に（2026-07-19 上月さん）。
+// 0 にすると Before を出さない。
 const MAX_BEFORE_TAIL = Number.isFinite(Number(process.env.MAX_BEFORE_TAIL))
   ? Number(process.env.MAX_BEFORE_TAIL)
-  : 2;
+  : 1;
 
 /**
  * QC後の kept 配列を「After先頭・Before最後」に並び替える。
@@ -330,11 +481,14 @@ const MAX_BEFORE_TAIL = Number.isFinite(Number(process.env.MAX_BEFORE_TAIL))
  *   分類情報がない場合（QCスキップ・API失敗）はファイル名ラベルにフォールバック
  * - After写真が1枚以上ある場合、Before超過分（MAX_BEFORE_TAIL超）は配列から外す
  * - 並び順：[After（hero映え順）, middle/unknown, Before最後最大MAX_BEFORE_TAIL枚]
+ * - max を渡すと最終枚数を max に絞る。その際 Before の末尾1〜MAX_BEFORE_TAIL枚は
+ *   必ず確保してから After/middle を詰めるので、After が多くても対比のBeforeが消えない。
  * @param {string[]} kept - QC通過済みの画像URL配列（元の順序）
  * @param {{after: string[], before: string[]}} qc - vision分類結果
+ * @param {number} [max] - 最終枚数の上限（未指定なら絞らない）
  * @returns {string[]} 並び替え＆Before上限適用後の配列
  */
-export function reorderByClassification(kept, qc) {
+export function reorderByClassification(kept, qc, max) {
   if (!Array.isArray(kept) || kept.length <= 1) return kept;
   const isAfterName = (u) => /[\/\-_.]after[\/\-_.]/i.test(u);
   const isBeforeName = (u) => /[\/\-_.]before[\/\-_.]/i.test(u);
@@ -361,13 +515,27 @@ export function reorderByClassification(kept, qc) {
   const middles = kept.filter((u) => kindOf(u) === "middle");
   const befores = kept.filter((u) => kindOf(u) === "before");
 
-  // After が 1枚以上あれば Before は MAX_BEFORE_TAIL 枚に絞る（超過分は投稿から外す）
-  // After が 0 だと carousel が成立しなくなる可能性があるので絞らない
-  const beforeTail = (afterOrdered.length >= 1 && MAX_BEFORE_TAIL > 0)
-    ? befores.slice(0, MAX_BEFORE_TAIL)
-    : befores;
+  const hasMax = Number.isFinite(max) && max > 0;
 
-  return [...afterOrdered, ...middles, ...beforeTail];
+  if (afterOrdered.length >= 1) {
+    // 通常経路：After先頭 → middle → Before末尾（最大MAX_BEFORE_TAIL枚、0なら出さない）
+    const beforeTail = befores.slice(0, MAX_BEFORE_TAIL);
+    const head = [...afterOrdered, ...middles];
+    if (hasMax) {
+      // Before末尾枠を先に確保してから After/middle を詰める
+      // （Afterがmax枚以上あっても対比のBeforeが押し出されない）。最後に必ずmax以内へ丸める。
+      const room = Math.max(0, max - beforeTail.length);
+      return [...head.slice(0, room), ...beforeTail].slice(0, max);
+    }
+    return [...head, ...beforeTail];
+  }
+
+  // Afterゼロ記事（QCがAfterを1枚も検出できなかった稀ケース）：
+  // 1枚目がBeforeになる事故（昔の「1枚目Before」クレーム）を避け、
+  // kept先頭（通常はfeatured＝メイン完成カット）を必ず先頭に固定 → middle → before。
+  const first = kept[0];
+  const ordered = [first, ...middles.filter((u) => u !== first), ...befores.filter((u) => u !== first)];
+  return hasMax ? ordered.slice(0, max) : ordered;
 }
 
 export async function buildPostPayload(post) {
@@ -377,10 +545,12 @@ export async function buildPostPayload(post) {
     ?? (post.featured_media ? await getMediaUrlFallback(post.featured_media) : null);
   const bodyImages = post.body_images
     ?? extractBodyImages(post.content?.rendered || "");
-  const candidates = reorderImages(featuredUrl, bodyImages, MAX_IMAGES);
+  // ① 候補を広め（CANDIDATE_MAX）に作る＝ここで絞りすぎない
+  const candidates = reorderImages(featuredUrl, bodyImages, CANDIDATE_MAX);
+  // ② vision QC＋Before/After分類
   const qc = await curateImages(candidates, post);
-  // After先頭・Before最後1〜2枚に並び替え（vision分類優先・なければファイル名フォールバック）
-  const images = reorderByClassification(qc.kept, qc);
+  // ③ After先頭・Before末尾に並び替え＋MAX_IMAGESへ絞る（Before末尾枠を確保して詰める）
+  const images = reorderByClassification(qc.kept, qc, MAX_IMAGES);
   const caption = buildCaption(post);
   return { images, caption, candidates, qc };
 }
@@ -529,6 +699,24 @@ export async function postToInstagram({ images, caption, igUserId, igToken }) {
     e.failedImages = failedImages;
     throw e;
   }
+}
+
+/**
+ * 「新規投稿お知らせ」告知ストーリー（NEW WORKS）を1枚投稿する。
+ * フィード投稿の1枚目（hero After）を /api/story-card で建築ブランド風の縦型カードに
+ * 合成してから STORIES として投稿する。画像合成はサーバー側(story-card)が担当。
+ * @returns {Promise<{storyId:string, cardUrl:string}>}
+ */
+export async function postStory({ heroImageUrl, igUserId, igToken }) {
+  if (!heroImageUrl) throw new Error("postStory: heroImageUrl がありません");
+  const cardUrl = `${STORY_CARD_BASE}/api/story-card?u=${encodeURIComponent(heroImageUrl)}`;
+  const containerId = await createMediaContainer(igUserId, igToken, {
+    imageUrl: cardUrl,
+    mediaType: "STORIES",
+  });
+  await waitForReady(igToken, containerId);
+  const storyId = await publishMedia(igUserId, igToken, containerId);
+  return { storyId, cardUrl };
 }
 
 // ===== CLIエントリポイント =====

@@ -1,0 +1,10 @@
+.env.local
+.env
+node_modules
+.vercel
+.git
+.DS_Store
+*.log
+*.output
+scratch_*.mjs
+scratch_*/

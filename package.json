@@ -12,5 +12,10 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "satori": "^0.33.5",
+    "sharp": "^0.35.3"
   }
 }

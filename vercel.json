@@ -10,6 +10,14 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/preview",
+      "schedule": "0 4 * * 0,2,4"
+    },
+    {
+      "path": "/api/cron/remind",
+      "schedule": "0 8 * * 0,2,4"
+    },
+    {
       "path": "/api/cron/post",
       "schedule": "0 0 * * 1,3,5"
     },
@@ -23,8 +31,23 @@
     }
   ],
   "functions": {
+    "api/story-card.js": {
+      "maxDuration": 30,
+      "includeFiles": "public/story-overlay.png"
+    },
+    "api/cover.js": {
+      "maxDuration": 30,
+      "includeFiles": "public/fonts/*.ttf"
+    },
+    "api/cron/preview.js": {
+      "maxDuration": 120,
+      "includeFiles": "public/badges/*.png"
+    },
     "api/cron/post.js": {
       "maxDuration": 300
+    },
+    "api/approve.js": {
+      "maxDuration": 30
     },
     "api/cron/refresh-token.js": {
       "maxDuration": 60

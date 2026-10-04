@@ -4,3 +4,8 @@ node_modules/
 .DS_Store
 *.log
 .vercel/
+
+# scratch (本番・gitに入れない)
+scratch_*.mjs
+scratch_*/
+*.output
