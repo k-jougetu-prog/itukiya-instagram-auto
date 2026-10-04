@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>施工事例インスタ 写真を選び直す</title>
+<style>
+  :root{--cream:#f3eee3;--olive:#4a5d3a;--ink:#2b2b28;--line:#ddd5c4;--muted:#8a8577;--before:#9a6a3a;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;overscroll-behavior:none;}
+  body{font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif;background:#efe9dd;color:var(--ink);line-height:1.6;padding-bottom:98px;}
+  .wrap{max-width:640px;margin:0 auto;padding:14px;}
+  .bar{background:var(--olive);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:20;}
+  .bar h1{margin:0;font-size:16px;font-weight:700;}
+  .bar p{margin:4px 0 0;font-size:12px;opacity:.9;word-break:break-all;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin:14px 0;}
+  .card h2{font-size:14px;margin:0 0 4px;color:var(--olive);}
+  .card .hint{font-size:12px;color:var(--muted);margin:0 0 12px;}
+  .tag{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--olive);border-radius:6px;padding:2px 8px;letter-spacing:.06em;}
+  .tag.b{background:var(--before);}
+  /* 表紙Before/After選択は全候補をグリッドで（横スクロールだと22枚案件で隠れるため） */
+  .grid-sel{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+  .grid-sel img{width:100%;aspect-ratio:4/3;border-radius:8px;border:3px solid transparent;object-fit:cover;background:#eee;min-width:0;}
+  .grid-sel img.sel{border-color:var(--olive);box-shadow:0 0 0 2px #fff inset;}
+  .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+  .cell{position:relative;border-radius:10px;overflow:hidden;border:2px solid var(--line);aspect-ratio:4/3;background:#eee;cursor:pointer;min-width:0;}
+  .cell img{width:100%;height:100%;object-fit:cover;display:block;}
+  .cell .dim{position:absolute;inset:0;background:rgba(255,255,255,.5);display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--olive);font-weight:300;}
+  .cell.on .dim{display:none;}
+  .cell.on{border-color:var(--olive);}
+  .cell .num{position:absolute;left:6px;top:6px;width:24px;height:24px;border-radius:50%;background:var(--olive);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  #coverPrev{width:100%;border-radius:12px;border:1px solid var(--line);display:block;background:#f3eee3;aspect-ratio:1/1;}
+  #prevNote{font-size:12px;color:var(--muted);text-align:center;padding:8px;}
+  .strip{display:flex;gap:6px;overflow-x:auto;padding:8px 2px;}
+  .strip .s{flex:0 0 auto;width:84px;}
+  .strip .s img{width:84px;height:63px;object-fit:cover;border-radius:6px;display:block;background:#eee;}
+  .strip .s .lbl{font-size:10px;text-align:center;color:var(--muted);margin-top:2px;}
+  .field{display:flex;flex-direction:column;gap:6px;margin-top:10px;}
+  .field label{font-size:12px;color:var(--muted);}
+  .field input{font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;width:100%;font-family:"YuMincho","Hiragino Mincho ProN",serif;}
+  .footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;z-index:30;}
+  .btn{appearance:none;border:0;border-radius:12px;padding:14px 18px;font-size:15px;font-weight:700;min-height:48px;flex:1 1 auto;max-width:280px;}
+  .btn.go{background:var(--olive);color:#fff;}
+  .btn.go:disabled{opacity:.5;}
+  .btn.ghost{background:#efe9dd;color:var(--ink);}
+  .mask{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .mask.show{display:flex;}
+  .modal{background:#fff;border-radius:16px;padding:22px;width:min(420px,100%);text-align:center;}
+  .modal h3{margin:0 0 8px;color:var(--olive);}
+  .modal p{font-size:14px;margin:0 0 16px;white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>📷 写真を選び直す</h1>
+  <p id="ttl">読み込み中…</p>
+</div>
+<div class="wrap" id="main" style="display:none">
+
+  <div class="card">
+    <h2>① 1枚目の表紙（ビフォーアフター）</h2>
+    <p class="hint">左Before・右Afterの半々表紙にします。同じ場所の「以前」と「完成後」を1枚ずつ選んでください。選ばなければ表紙なしで完成後の写真が1枚目になります。</p>
+    <div><span class="tag b">BEFORE（以前）</span></div>
+    <div class="grid-sel" id="rowBefore"></div>
+    <div style="margin-top:10px"><span class="tag">AFTER（完成後）</span></div>
+    <div class="grid-sel" id="rowAfter"></div>
+    <div class="field">
+      <label>表紙の見出し（明朝で表示。お名前は入れないでください）</label>
+      <input id="title" type="text" maxlength="24" placeholder="例：浴室・洗面リフォーム">
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>② カルーセル写真（2枚目以降）</h2>
+    <p class="hint">投稿に載せる写真をタップで選びます。もう一度タップで外す。番号＝並び順（タップした順）。完成後を先に、最後に施工前を1枚入れると変化が伝わります。</p>
+    <div class="grid" id="gallery"></div>
+  </div>
+
+  <div class="card">
+    <h2>③ できあがりプレビュー</h2>
+    <p class="hint">1枚目＝表紙、2枚目以降＝選んだ写真。この順でカルーセル投稿されます。</p>
+    <img id="coverPrev" alt="表紙プレビュー">
+    <div id="prevNote"></div>
+    <div class="strip" id="strip"></div>
+  </div>
+
+</div>
+
+<div class="footer" id="footer" style="display:none">
+  <button class="btn ghost" id="reset">最初の提案に戻す</button>
+  <button class="btn go" id="go">この内容で投稿する</button>
+</div>
+
+<div class="mask" id="mask">
+  <div class="modal">
+    <h3 id="mh">確認</h3>
+    <p id="mb"></p>
+    <button class="btn go" id="mclose" style="max-width:none">閉じる</button>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get("t") || "";
+let DATA = null, PHOTOS = [], enSub = "RENOVATION & REFORM", INIT = null;
+let state = { before: null, after: null, carousel: [] };
+
+function modal(h, b){ document.getElementById("mh").textContent=h; document.getElementById("mb").textContent=b; document.getElementById("mask").classList.add("show"); }
+document.getElementById("mclose").onclick=()=>document.getElementById("mask").classList.remove("show");
+
+async function boot(){
+  if(!TOKEN){ document.getElementById("ttl").textContent="リンクが無効です"; return; }
+  let r;
+  try { r = await fetch("/api/edit-data?t="+encodeURIComponent(TOKEN)); } catch { document.getElementById("ttl").textContent="通信エラー"; return; }
+  if(!r.ok){ document.getElementById("ttl").textContent="リンクが無効か期限切れです（最新の通知から開いてください）"; return; }
+  DATA = await r.json();
+  PHOTOS = DATA.photos || [];
+  enSub = DATA.enSub || "RENOVATION & REFORM";
+  document.getElementById("ttl").textContent = "🏠 " + (DATA.title || "");
+  document.getElementById("title").value = DATA.headline || "";
+  INIT = { before: DATA.before || null, after: DATA.after || null, carousel: [...(DATA.carousel || [])] };
+  state = JSON.parse(JSON.stringify(INIT));
+  document.getElementById("main").style.display="block";
+  document.getElementById("footer").style.display="flex";
+  render();
+}
+
+function buildRow(rowId, key){
+  const row=document.getElementById(rowId); row.innerHTML="";
+  PHOTOS.forEach(url=>{
+    const im=new Image(); im.src=url; im.loading="lazy";
+    if(state[key]===url) im.classList.add("sel");
+    im.onclick=()=>{ state[key] = (state[key]===url ? null : url); buildRow(rowId,key); drawCover(); };
+    row.appendChild(im);
+  });
+}
+function idxInCar(url){ return state.carousel.indexOf(url); }
+function buildGallery(){
+  const g=document.getElementById("gallery"); g.innerHTML="";
+  PHOTOS.forEach(url=>{
+    const cell=document.createElement("div"); cell.className="cell";
+    const im=new Image(); im.src=url; im.loading="lazy"; cell.appendChild(im);
+    const i=idxInCar(url);
+    if(i>=0){
+      cell.classList.add("on");
+      const num=document.createElement("div"); num.className="num"; num.textContent=(i + (state.before&&state.after?2:1)); cell.appendChild(num);
+    }else{
+      const dim=document.createElement("div"); dim.className="dim"; dim.textContent="＋"; cell.appendChild(dim);
+    }
+    cell.onclick=()=>{
+      const j=idxInCar(url);
+      if(j>=0) state.carousel.splice(j,1); else state.carousel.push(url);
+      buildGallery(); drawStrip();
+    };
+    g.appendChild(cell);
+  });
+}
+
+let prevTimer=null;
+function drawCover(){
+  const img=document.getElementById("coverPrev"), note=document.getElementById("prevNote");
+  if(!(state.before && state.after)){
+    img.removeAttribute("src"); note.textContent="※ 表紙のBeforeとAfterを選ぶと、ここに半々表紙が表示されます（未選択なら表紙なしで投稿）";
+    buildGallery(); return;
+  }
+  note.textContent="表紙を生成中…";
+  clearTimeout(prevTimer);
+  prevTimer=setTimeout(()=>{
+    const t=document.getElementById("title").value||DATA.headline||"";
+    const q=new URLSearchParams({ b:state.before, a:state.after, t, e:enSub });
+    img.onload=()=>{ note.textContent=""; };
+    img.onerror=()=>{ note.textContent="⚠️ 表紙の生成に失敗しました"; };
+    img.src="/api/cover?"+q.toString();
+  }, 450);
+  buildGallery();
+}
+function drawStrip(){
+  const s=document.getElementById("strip"); s.innerHTML="";
+  if(state.before && state.after){
+    const d=document.createElement("div"); d.className="s"; const im=new Image(); im.src=state.after; im.style.border="2px solid var(--olive)";
+    d.appendChild(im); const l=document.createElement("div"); l.className="lbl"; l.textContent="1枚目 表紙"; d.appendChild(l); s.appendChild(d);
+  }
+  const base = (state.before && state.after) ? 2 : 1;
+  state.carousel.forEach((url,i)=>{
+    const d=document.createElement("div"); d.className="s"; const im=new Image(); im.src=url; d.appendChild(im);
+    const l=document.createElement("div"); l.className="lbl"; l.textContent=(i+base)+"枚目"; d.appendChild(l); s.appendChild(d);
+  });
+}
+function render(){ buildRow("rowBefore","before"); buildRow("rowAfter","after"); buildGallery(); drawCover(); drawStrip(); }
+
+document.getElementById("title").addEventListener("input", drawCover);
+document.getElementById("reset").onclick=()=>{ state=JSON.parse(JSON.stringify(INIT)); document.getElementById("title").value=DATA.headline||""; render(); };
+
+document.getElementById("go").onclick=async ()=>{
+  const total = state.carousel.length + ((state.before&&state.after)?1:0);
+  if(state.carousel.length < 1){ modal("写真が足りません","カルーセル写真を1枚以上えらんでください。"); return; }
+  if((state.before && !state.after) || (!state.before && state.after)){ modal("表紙の選択","表紙を作るならBeforeとAfterの両方を選んでください（両方なしなら表紙なしで投稿します）。"); return; }
+  const btn=document.getElementById("go"); btn.disabled=true; btn.textContent="保存中…";
+  const payload={ before:state.before, after:state.after, headline:document.getElementById("title").value, carousel:state.carousel };
+  const body=new URLSearchParams(); body.set("t",TOKEN); body.set("payload",JSON.stringify(payload));
+  let r;
+  try{ r=await fetch("/api/edit",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body}); }
+  catch{ btn.disabled=false; btn.textContent="この内容で投稿する"; modal("通信エラー","保存できませんでした。電波のよい所でもう一度お試しください。"); return; }
+  const j=await r.json().catch(()=>({}));
+  btn.disabled=false; btn.textContent="この内容で投稿する";
+  if(r.ok){ modal("保存しました ✅", "この内容（全"+(j.images||total)+"枚）で、あす朝9時に投稿されます。\n変更はこの画面からいつでもやり直せます。"); }
+  else { modal("保存できませんでした", (j.error||"エラーが出ました")+"\n担当（上月翔）にお知らせください。"); }
+};
+
+boot();
+</script>
+</body>
+</html>

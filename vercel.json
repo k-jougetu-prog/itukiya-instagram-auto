@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/edit", "destination": "/edit.html" }
+  ],
   "headers": [
     {
       "source": "/intro/(.*)",
@@ -38,6 +41,12 @@
     "api/cover.js": {
       "maxDuration": 30,
       "includeFiles": "public/fonts/*.ttf"
+    },
+    "api/edit.js": {
+      "maxDuration": 30
+    },
+    "api/edit-data.js": {
+      "maxDuration": 30
     },
     "api/cron/preview.js": {
       "maxDuration": 120,

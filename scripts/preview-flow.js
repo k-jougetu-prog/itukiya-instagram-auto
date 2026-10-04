@@ -297,12 +297,16 @@ export function buildPreviewMessage({ post, images, qc, key, variant = "group" }
   if (variant === "owner") {
     const approveUrl = `${APPROVE_BASE}/api/approve?t=${signToken({ k: key, pid: post.id, a: "approve" })}`;
     const rejectUrl = `${APPROVE_BASE}/api/reject?t=${signToken({ k: key, pid: post.id, a: "reject" })}`;
+    const editUrl = `${APPROVE_BASE}/edit?t=${signToken({ k: key, pid: post.id, a: "edit" })}`;
     body = [
       ...head,
       "▼ 最終確認をお願いします（スマホからワンタップ）",
       "",
       "✅ これでOK（あす朝9時に投稿します）",
       approveUrl,
+      "",
+      "✏️ 写真を選び直す（表紙・並び順も変更OK）",
+      editUrl,
       "",
       "❌ 保留・直したい（投稿を止めます）",
       rejectUrl,
@@ -311,10 +315,14 @@ export function buildPreviewMessage({ post, images, qc, key, variant = "group" }
       "[/info]",
     ].join("\n");
   } else {
+    const editUrl = `${APPROVE_BASE}/edit?t=${signToken({ k: key, pid: post.id, a: "edit" })}`;
     body = [
       "[toall]",
       ...head,
-      "▼ お気づきの点があれば【本日17時まで】にこのチャットで返信ください🙏",
+      "▼ 写真を選び直す・順番や表紙を変えるのはこちらから（営業のみなさん、どなたでも操作OK）",
+      editUrl,
+      "",
+      "▼ ひとことだけなら【本日17時まで】にこのチャットで返信でもOK🙏",
       "（例：この写真もう少しこうしたい／順番を入れ替えたい 等）",
       "",
       "最終OK・保留は上月さんが判断します。特に意見が無ければ、あす朝9時にこの内容で投稿されます。",
