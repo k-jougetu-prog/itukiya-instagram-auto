@@ -1,14 +1,13 @@
 // 半々ビフォーアフター表紙(案A 額装/マット)をサーバー生成する共通ロジック。
-// satori(JSX→SVG) + @resvg/resvg-js(SVG→PNG) + sharp(写真取得・JPEG化)。
-// フォントを明示的に渡すので Vercel(システムフォント無し)でも日本語明朝が出る。
-// ローカル生成 == 本番生成 の結果一致が利点。
-//
-// 使い方: buildCover({ beforeUrl, afterUrl, title, sub }) -> JPEG Buffer
+// @napi-rs/canvas(日本語フォントをregisterして描画) + sharp(写真取得/JPEG化)。
+// ※当初 satori+resvg で実装したが、satori内部の harfbuzz(wasm) が Vercel の
+//   サーバーレスで初期化に失敗して500になったため、ネイティブ描画の canvas に移行。
+//   フォントを registerFromPath で明示登録するので Vercel でも日本語明朝が出る。
+//   ローカル生成 == 本番生成。
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import satori from "satori";
-import { Resvg } from "@resvg/resvg-js";
+import { createCanvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
 import sharp from "sharp";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,71 +19,118 @@ const INK = "#2f2b24";
 const GOLD = "#b9a06a";
 const SUB = "#8a8575";
 
-let _fonts = null;
-function fonts() {
-  if (_fonts) return _fonts;
-  _fonts = [
-    { name: "NotoSerifJP", data: fs.readFileSync(path.join(FONT_DIR, "NotoSerifJP-sb.ttf")), weight: 600, style: "normal" },
-    { name: "NotoSerif", data: fs.readFileSync(path.join(FONT_DIR, "NotoSerif-md.ttf")), weight: 500, style: "normal" },
-  ];
-  return _fonts;
+let _reg = false;
+function registerFonts() {
+  if (_reg) return;
+  GlobalFonts.registerFromPath(path.join(FONT_DIR, "NotoSerifJP-sb.ttf"), "NotoSerifJP");
+  GlobalFonts.registerFromPath(path.join(FONT_DIR, "NotoSerif-md.ttf"), "NotoSerifLatin");
+  _reg = true;
 }
 
-async function toDataUri(url, w, h) {
-  // redirect:"manual" で3xxを拒否。itukiya.jp上のオープンリダイレクト経由の内部到達(SSRF)を封じる。
+async function fetchResized(url, w, h) {
+  // redirect:"manual" で3xxを拒否（itukiya.jp上のオープンリダイレクト経由のSSRFを封じる）。
   const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "manual" });
   if (r.status >= 300 && r.status < 400) throw new Error(`redirect not allowed: ${url}`);
   if (!r.ok) throw new Error(`fetch ${r.status} ${url}`);
   const buf = Buffer.from(await r.arrayBuffer());
-  const jpg = await sharp(buf).rotate().resize(w, h, { fit: "cover" }).jpeg({ quality: 88 }).toBuffer();
-  return `data:image/jpeg;base64,${jpg.toString("base64")}`;
+  return sharp(buf).rotate().resize(w, h, { fit: "cover" }).jpeg({ quality: 88 }).toBuffer();
 }
 
-// satori が受け取る React-element 風オブジェクトを素の関数で組む
-const el = (type, style, children) => ({ type, props: { style, ...(children !== undefined ? { children } : {}) } });
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// letterSpacing 非対応環境向けに、文字間を手動で詰めて中央寄せ描画する。
+function fillTextTracked(ctx, text, cx, y, letter) {
+  const chars = [...text];
+  const widths = chars.map((c) => ctx.measureText(c).width);
+  const total = widths.reduce((a, b) => a + b, 0) + letter * (chars.length - 1);
+  let x = cx - total / 2;
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = "left";
+  for (let i = 0; i < chars.length; i++) {
+    ctx.fillText(chars[i], x, y);
+    x += widths[i] + letter;
+  }
+  ctx.textAlign = prevAlign;
+}
 
 export async function buildCover({ beforeUrl, afterUrl, title, sub, enSub }) {
+  registerFonts();
+  const W = 1080, H = 1080, M = 56, G = 20;
+  const PW = Math.floor((W - M * 2 - G) / 2), PH = 636, TOP = 70;
   const EN = (enSub || "RENOVATION & REFORM").toUpperCase();
-  const W = 1080, H = 1080;
-  const PHOTO_W = 471, PHOTO_H = 636;
-  const [bImg, aImg] = await Promise.all([
-    toDataUri(beforeUrl, PHOTO_W, PHOTO_H),
-    toDataUri(afterUrl, PHOTO_W, PHOTO_H),
+
+  const [bBuf, aBuf] = await Promise.all([
+    fetchResized(beforeUrl, PW, PH),
+    fetchResized(afterUrl, PW, PH),
   ]);
+  const [bImg, aImg] = await Promise.all([loadImage(bBuf), loadImage(aBuf)]);
 
-  // 写真は satori の background だと描画が不安定なので <img> 要素で入れる。
-  // sharp 側で既に PHOTO_W×PHOTO_H にcover済みなのでそのまま等倍表示。
-  const photoCard = (uri) => ({
-    type: "img",
-    props: { src: uri, width: PHOTO_W, height: PHOTO_H, style: { borderRadius: 14, objectFit: "cover" } },
-  });
+  const cv = createCanvas(W, H);
+  const ctx = cv.getContext("2d");
 
-  const label = (text, color) =>
-    el("div", {
-      display: "flex", width: PHOTO_W, justifyContent: "center",
-      fontFamily: "NotoSerif", fontSize: 28, letterSpacing: 7, color,
-    }, text);
+  // 背景(クリーム) ＋ 金の外枠
+  ctx.fillStyle = CREAM;
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
 
-  const tree = el("div", {
-    display: "flex", flexDirection: "column", width: W, height: H,
-    backgroundColor: CREAM, padding: 56, border: `3px solid ${GOLD}`,
-  }, [
-    el("div", { display: "flex", gap: 20 }, [photoCard(bImg), photoCard(aImg)]),
-    el("div", { display: "flex", gap: 20, marginTop: 18 }, [label("BEFORE", SUB), label("AFTER", OLIVE)]),
-    el("div", { display: "flex", flexDirection: "column", marginTop: "auto", alignItems: "center", width: "100%" }, [
-      el("div", { display: "flex", fontFamily: "NotoSerifJP", fontSize: 62, color: INK, textAlign: "center" }, title),
-      el("div", { display: "flex", fontFamily: "NotoSerif", fontSize: 21, letterSpacing: 7, color: GOLD, marginTop: 16 }, EN),
-      el("div", { display: "flex", width: 300, height: 1, backgroundColor: GOLD, opacity: 0.5, marginTop: 30, marginBottom: 24 }),
-      el("div", { display: "flex", fontFamily: "NotoSerifJP", fontSize: 25, letterSpacing: 5, color: OLIVE }, "いつき家　リフォーム施工事例"),
-    ]),
-  ]);
+  // 写真2枚（角丸カードで額装）
+  const drawPhoto = (img, x) => {
+    ctx.save();
+    roundRectPath(ctx, x, TOP, PW, PH, 14);
+    ctx.clip();
+    ctx.drawImage(img, x, TOP, PW, PH);
+    ctx.restore();
+  };
+  drawPhoto(bImg, M);
+  drawPhoto(aImg, M + PW + G);
 
-  const svg = await satori(tree, { width: W, height: H, fonts: fonts() });
-  const png = new Resvg(svg, { fitTo: { mode: "width", value: W } }).render().asPng();
-  return await sharp(png).jpeg({ quality: 90 }).toBuffer();
+  // BEFORE / AFTER（セリフ・字間広め）
+  ctx.textBaseline = "alphabetic";
+  ctx.font = "28px NotoSerifLatin";
+  ctx.fillStyle = SUB;
+  fillTextTracked(ctx, "BEFORE", M + PW / 2, TOP + PH + 52, 7);
+  ctx.fillStyle = OLIVE;
+  fillTextTracked(ctx, "AFTER", M + PW + G + PW / 2, TOP + PH + 52, 7);
+
+  // 見出し（明朝・大）
+  ctx.fillStyle = INK;
+  ctx.font = "62px NotoSerifJP";
+  fillTextTracked(ctx, title, W / 2, TOP + PH + 150, 1);
+
+  // 英字サブ（金・字間広め）
+  ctx.fillStyle = GOLD;
+  ctx.font = "21px NotoSerifLatin";
+  fillTextTracked(ctx, EN, W / 2, TOP + PH + 200, 7);
+
+  // 区切り線
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(W / 2 - 150, H - 118);
+  ctx.lineTo(W / 2 + 150, H - 118);
+  ctx.stroke();
+  ctx.restore();
+
+  // マーク
+  ctx.fillStyle = OLIVE;
+  ctx.font = "25px NotoSerifJP";
+  fillTextTracked(ctx, "いつき家　リフォーム施工事例", W / 2, H - 66, 5);
+
+  return sharp(cv.toBuffer("image/png")).jpeg({ quality: 90 }).toBuffer();
 }
 
-// サブ(エリア/様邸)は呼び出し側で組むが、英字サブは工種から出すためのヘルパ余地を残す
 export function defaultSub(area, teritoryLabel) {
   return [area, teritoryLabel].filter(Boolean).join("  ");
 }
